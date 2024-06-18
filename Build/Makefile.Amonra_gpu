@@ -1,0 +1,28 @@
+#CC       =  gcc
+#CXX      =  g++
+
+MPICC    =  gcc -I/opt/cluster/spack/opt/spack/linux-centos7-broadwell/gcc-11.2.0/openmpi-4.1.3-djxjqlmzbqwq76bhh3wvgxaefnoczleg/include -L/opt/cluster/spack/opt/spack/linux-centos7-broadwell/gcc-11.2.0/openmpi-4.1.3-djxjqlmzbqwq76bhh3wvgxaefnoczleg/lib -lmpi
+MPIC++   =  g++ -I/opt/cluster/spack/opt/spack/linux-centos7-broadwell/gcc-11.2.0/openmpi-4.1.3-djxjqlmzbqwq76bhh3wvgxaefnoczleg/include -L/opt/cluster/spack/opt/spack/linux-centos7-broadwell/gcc-11.2.0/openmpi-4.1.3-djxjqlmzbqwq76bhh3wvgxaefnoczleg/lib -lmpi
+
+OPTIMIZE = -O3 -march=native -fopenmp -mavx -mavx2
+
+
+GSL_INCL = 
+GSL_LIB =  
+
+FFTW_INCL= 
+FFTW_LIB= 
+
+NVCC =
+NVFLAGS =
+NVLIB =
+
+CFLAGS += 
+
+MPICHLIB =
+HDF5INCL = 
+HDF5LIB  =
+
+OPTIMIZE += -Wno-unused-result -foffload=-lm 
+OPTIMIZE += -fcf-protection=none -fno-stack-protector -foffload=-misa=sm_35 -foffload=nvptx-none -fopt-info-all-omp 
+

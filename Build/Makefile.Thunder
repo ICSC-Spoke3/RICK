@@ -1,0 +1,23 @@
+CC       =  gcc
+CXX      =  g++
+
+MPICC    =  mpicc
+MPIC++   =  mpiCC
+
+OPTIMIZE = mpicc -Wall -fopenmp -O4 -march=armv8.1-a -mtune=thunderx2t99 -funroll-loops -ftree-vectorize -fno-stack-protector -fomit-frame-pointer -faggressive-loop-optimizations
+
+GSL_INCL = 
+GSL_LIB =  
+
+FFTW_INCL= 
+FFTW_LIB= 
+
+NVCC =
+NVFLAGS =
+NVLIB =
+
+CFLAGS += 
+
+MPICHLIB =
+HDF5INCL = 
+HDF5LIB  = 

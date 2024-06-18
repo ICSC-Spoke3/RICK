@@ -1,0 +1,34 @@
+CC       =  gcc-10
+CXX      =  g++-10
+
+MPICC    =  mpicc
+MPIC++   =  mpiCC
+
+GSL_INCL =  -I/home/taffoni/sw/include
+GSL_LIBS =  -L/home/taffoni/sw/lib
+
+FFTW_INCL=  -I/home/taffoni/sw/include
+FFTW_LIB=  /home/taffoni/sw/lib   -lfftw3_mpi -lfftw3
+
+#-L/opt/cluster/openmpi/3.1.3/gnu/8.2.0/lib -lmpi
+MPI_LIB =
+#-I/opt/cluster/openmpi/3.1.3/gnu/8.2.0/include
+MPI_INCL= -I/home/taffoni/sw/Linux_x86_64/21.5/comm_libs/mpi/include
+HDF5_INCL =
+HDF5_LIB  =
+
+OMP = -mp=multicore,gpu -Mprof -cuda
+#OMP = -fopenmp
+NVCC = nvcc
+NVFLAGS = -arch=sm_70 -Xcompiler -std=c++11
+NVLIB = -L/home/taffoni/sw/Linux_x86_64/21.5/cuda/11.3/lib64/ -lcudart -lcuda
+
+
+CFLAGS +=  -I. $(FFTW_INCL) $(GSL_INCL) $(MPI_INCL)
+
+OPTIMIZE =  $(OMP) -O3
+
+# OMP GPU SPECIFIC FLAGS
+#OPTIMIZE += -Wno-unused-result -foffload=-lm -ffast-math
+#OPTIMIZE += -fcf-protection=none -fno-stack-protector -foffload=nvptx-none -foffload=-misa=sm_35
+#-ffast-math  -fopt-info-all-omp -foffload=-misa=sm_35 -fcf-protection=none -fno-stack-protector -foffload=nvptx-none

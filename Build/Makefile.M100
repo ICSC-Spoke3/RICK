@@ -1,0 +1,20 @@
+CC       =  gcc
+CXX      =  g++
+
+MPICC    =  mpicc
+MPIC++   =  mpiCC
+
+
+#FFTW_INCL=  -I/home/taffoni/sw/include
+#FFTW_LIB=  -L/home/taffoni/sw/lib
+
+
+NVCC = nvcc
+NVFLAGS = -arch=sm_70 -Xcompiler -mno-float128 -std=c++11
+NVLIB = -L/cineca/prod/opt/compilers/cuda/10.1/none/lib64/ -lcudart -lcuda
+
+OMP= -fopenmp
+
+CFLAGS +=  -I. $(FFTW_INCL) $(GSL_INCL) $(MPI_INCL)
+
+OPTIMIZE = $(OMP) -O3 -mtune=native

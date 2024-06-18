@@ -1,0 +1,44 @@
+CC       =  gcc
+CXX      =  g++
+
+MPICC    =  mpicc
+MPIC++   =  mpiCC 
+
+OMP = -fopenmp
+OMP_GPU = -mp=multicore,gpu -gpu=cuda11.8 -gpu=cc70
+
+CUDA_INC = -I/cineca/prod/opt/compilers/hpc-sdk/2022/binary/Linux_ppc64le/2022/cuda/11.8/include
+CUDA_LIB = -L/cineca/prod/opt/compilers/hpc-sdk/2022/binary/Linux_ppc64le/2022/cuda/11.8/lib64
+
+FFT_INC  = -I/cineca/prod/opt/compilers/hpc-sdk/2022/binary/Linux_ppc64le/2022/math_libs/11.8/include/cufftmp
+FFT_LIB  = -L/cineca/prod/opt/compilers/hpc-sdk/2022/binary/Linux_ppc64le/2022/math_libs/11.8/lib64
+
+NVSHMEM_INC = -I/cineca/prod/opt/compilers/hpc-sdk/2022/binary/Linux_ppc64le/2022/comm_libs/11.8/nvshmem/include
+NVSHMEM_LIB = -L/cineca/prod/opt/compilers/hpc-sdk/2022/binary/Linux_ppc64le/2022/comm_libs/11.8/nvshmem/lib
+
+MPI_INC = 
+MPI_LIB = 
+
+OPTIMIZE = -O3 $(OMP) -march=native -mavx -mavx2 
+
+GSL_INCL = 
+GSL_LIB =  
+
+FFTW_INCL= 
+FFTW_LIB= 
+
+NVCC       = ${CUDA_HOME}/bin/nvcc
+OPT_NVCC   = -std=c++17 --generate-code arch=compute_70,code=sm_70 --generate-code arch=compute_80,code=sm_80 --generate-code arch=compute_90,code=sm_90
+FLAGS_NVCC = $(CUDA_INC) $(CUDA_LIB) $(FFT_INC) $(FFT_LIB) $(NVSHMEM_INC) $(NVSHMEM_LIB) $(MPI_INC) $(MPI_LIB) -lnvshmem_host -lnvshmem_device -lcuda -lcudart -lcufftMp
+
+NVC     = nvc
+NVC++   = nvc++ 
+NVFLAGS = -O3 -fast -march=native $(OMP_GPU) -mavx -mavx2  
+NVLIB   = $(CUDA_INC) $(CUDA_LIB) $(MPI_INC) $(MPI_LIB) -lcuda -lcudart 
+NVLIB_2 = $(CUDA_INC) $(CUDA_LIB) $(MPI_INC) $(MPI_LIB) $(FFT_INC) $(FFT_LIB) $(NVSHMEM_INC) $(NVSHMEM_LIB) -lnvshmem_host -lnvshmem_device -lcuda -lcudart -lcufftMp 
+
+CFLAGS += 
+
+MPICHLIB =
+HDF5INCL = 
+HDF5LIB  = 
