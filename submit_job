@@ -1,0 +1,15 @@
+#!/bin/bash
+#SBATCH -A IscrC_RICK
+#SBATCH -p boost_usr_prod
+#SBATCH --time=01:00:00
+#SBATCH -N 4
+#SBATCH --ntasks-per-node=32
+#SBATCH --mem=450G
+#SBATCH --gpus-per-node=4
+#SBATCH --exclusive
+#SBATCH --output=test_2.out
+#SBATCH --error=test_2.err
+
+mpirun -N 4 w-stacking_fftw_acc-cuda_acc-reduce_acc-fft data/paramfile.txt nsys profile --force-overwrite true --cuda-memory-usage true -o hpcimaging_fullgpu_16382xy_32w --trace mpi,cuda --cudabacktrace memory
+
+###mpirun -N 4 w-stacking_fftw_acc-cuda_acc-reduce_acc-fft data/paramfile.txt
