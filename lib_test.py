@@ -1,7 +1,6 @@
 USE_MPI = 0
 
 import numpy as np
-import casacore.tables as pt
 import time
 import sys
 if USE_MPI == 1:
@@ -29,93 +28,51 @@ so_phasecorr = "./phasecorr.so"
 c_gridding = ctypes.cdll.LoadLibrary(so_gridding)
 #c_fft = ctypes.cdll.LoadLibrary(so_fft)
 #c_phasecorr = ctypes.cdll.LoadLibrary(so_phasecorr)
-# input MS
-readtime0 = time.time()
-msfile = "./tail01_10chan.ms"
-ms = pt.table(msfile, readonly=True, ack=False)
 
-if rank == 0:
-# load data and metadata
- with pt.table(msfile + '::SPECTRAL_WINDOW', ack=False) as freqtab:
-    freq = freqtab.getcol('REF_FREQUENCY')[0] / 1000000.0
-    freqpersample = np.mean(freqtab.getcol('RESOLUTION'))
-    timepersample = ms.getcell('INTERVAL',0)
 
- print("Frequencies (MHz)   : ",freq)
- print("Time interval (sec) : ",timepersample)
 
- with pt.taql("SELECT ANTENNA1,ANTENNA2,sqrt(sumsqr(UVW)),GCOUNT() FROM $ms GROUPBY ANTENNA1,ANTENNA2") as BL:
-    ants1, ants2 = BL.getcol('ANTENNA1'), BL.getcol('ANTENNA2')
-    Ntime = BL.getcol('Col_4')[0] # number of timesteps
-    Nbaselines = len(ants1)
+with open('newgauss2noconj_t201806301100_SBL180.binMS/ucoord.bin', 'rb') as ufile:
+   uu = np.fromfile(ufile, dtype=np.float64)
 
- print("Number of timesteps : ",Ntime)
- print("Total obs time (hrs): ",timepersample*Ntime/3600)
- print("Number of baselines : ",Nbaselines)
+with open('newgauss2noconj_t201806301100_SBL180.binMS/vcoord.bin', 'rb') as vfile:
+   vv = np.fromfile(vfile, dtype=np.float64)
 
-#sp = pt.table(msfile+'::LOFAR_ANTENNA_FIELD', readonly=True, ack=False, memorytable=True).getcol('POSITION')
+with open('newgauss2noconj_t201806301100_SBL180.binMS/wcoord.bin', 'rb') as wfile:
+   ww = np.fromfile(wfile, dtype=np.float64)
 
- ant1, ant2 = ms.getcol('ANTENNA1'), ms.getcol('ANTENNA2')
+with open('newgauss2noconj_t201806301100_SBL180.binMS/visibilities_real.bin', 'rb') as visrealfile:
+   vis_real = np.fromfile(visrealfile, dtype=np.float64)
 
- number_of_measures = Ntime * Nbaselines
- #nm_pe_aux = int(number_of_measures / size)
- #remaining_aux = number_of_measures % size
- nm_pe = np.array(0)
- nm_pe = int(number_of_measures / size)
- remaining = np.array(0) 
- remaining = number_of_measures % size
- print(nm_pe,remaining)
+with open('newgauss2noconj_t201806301100_SBL180.binMS/visibilities_img.bin', 'rb') as visimgfile:
+   vis_imag = np.fromfile(visimgfile, dtype=np.float64)
 
-else:
- nm_pe = None
- remaining = None
+with open('newgauss2noconj_t201806301100_SBL180.binMS/weights.bin', 'rb') as weightsfile:
+   weight = np.fromfile(weightsfile, dtype=np.float64)
 
-#nm_pe = comm.bcast(nm_pe, root=0)
-#remaining = comm.bcast(remaining, root=0)
 
-# set the data domain for each MPI rank
-startrow = rank*nm_pe
-
-if rank == size-1:
-   nm_pe = nm_pe+remaining
-print(rank,nm_pe,remaining)
-
-nrow = nm_pe
-
-# read data
-uvw = ms.getcol('UVW',startrow,nrow)
-vis = ms.getcol('DATA',startrow,nrow)
-weight = ms.getcol('WEIGHT_SPECTRUM',startrow,nrow)
-print("Freqs per channel   : ",vis.shape[1])
-print("Polarizations       : ",vis.shape[2])
-print("Number of observations : ",uvw.shape[0])
-print("Data size (MB)      : ",uvw.shape[0]*vis.shape[1]*vis.shape[2]*2*4/1024.0/1024.0)
+# set convolutional kernel parameters full size 
+w_support = 7
 
 # set parameters
-num_points = uvw.shape[0]
+num_points = 100
 num_w_planes = 1 
 grid_size = 64    # number of cells of the grid
+polarisations = 4
+nchan = 4
+
 
 # serialize arrays
-vis_ser_real = vis.real.flatten()
-vis_ser_img = vis.imag.flatten()
-uu_ser = uvw[:,0].flatten()
-vv_ser = uvw[:,1].flatten()
-ww_ser = uvw[:,2].flatten()
+vis_ser_real = vis_real.flatten()
+vis_ser_imag = vis_imag.flatten()
+uu_ser = uu.flatten()
+vv_ser = vv.flatten()
+ww_ser = ww.flatten()
 weight_ser = weight.flatten()
 grid = np.zeros(2*num_w_planes*grid_size*grid_size)  # complex!
 gridss = np.zeros(2*num_w_planes*grid_size*grid_size)
 gridtot = np.zeros(2*num_w_planes*grid_size*grid_size)  # complex!
 image_real = np.zeros(num_w_planes*grid_size*grid_size)
 image_imag = np.zeros(num_w_planes*grid_size*grid_size)
-
-#peanokeys = np.empty(vis_ser_real.size,dtype=np.uint64)
-gsize = grid.size
-
-hist, bin_edges = np.histogram(ww_ser,num_w_planes)
-print(hist)
-
-print(vis_ser_real.dtype)
 
 # normalize uv
 minu = np.amin(uu_ser)
@@ -124,50 +81,6 @@ minv = np.amin(vv_ser)
 maxv = np.amax(vv_ser)
 minw = np.amin(ww_ser)
 maxw = np.amax(ww_ser)
-
-if USE_MPI == 1:
-   maxu_all = np.array(0,dtype=np.float)
-   maxv_all = np.array(0,dtype=np.float)
-   maxw_all = np.array(0,dtype=np.float)
-   minu_all = np.array(0,dtype=np.float)
-   minv_all = np.array(0,dtype=np.float)
-   minw_all = np.array(0,dtype=np.float)
-   comm.Allreduce(maxu, maxu_all, op=MPI.MAX)
-   comm.Allreduce(maxv, maxv_all, op=MPI.MAX)
-   comm.Allreduce(maxw, maxw_all, op=MPI.MAX)
-   comm.Allreduce(minu, minu_all, op=MPI.MIN)
-   comm.Allreduce(minv, minv_all, op=MPI.MIN)
-   comm.Allreduce(minw, minw_all, op=MPI.MIN)
-
-   ming = min(minu_all,minv_all)
-   maxg = max(maxu_all,maxv_all)
-   minw = minw_all
-   maxw = maxw_all
-
-#uu_ser = (uu_ser-ming)/(maxg-ming)
-#vv_ser = (vv_ser-ming)/(maxg-ming)
-#ww_ser = (ww_ser-minw)/(maxw-minw)
-print(uu_ser.shape, vv_ser.dtype, ww_ser.dtype, vis_ser_real.shape, vis_ser_img.dtype, weight_ser.dtype, grid.dtype)
-
-# set normalized uvw - mesh conversion factors
-#dx = 1.0/grid_size
-#dw = 1.0/num_w_planes
-
-readtime1 = time.time()
-# calculate peano keys
-t0 = time.time()
-
-# set convolutional kernel parameters full size 
-w_support = 7
-
-uu_ser = np.ascontiguousarray(uu_ser)
-vv_ser = np.ascontiguousarray(vv_ser)
-ww_ser = np.ascontiguousarray(ww_ser)
-grid = np.ascontiguousarray(grid)
-gridss = np.ascontiguousarray(gridss)
-vis_ser_real = np.ascontiguousarray(vis_ser_real)
-vis_ser_img = np.ascontiguousarray(vis_ser_img)
-weight_ser = np.ascontiguousarray(weight_ser)
 
 # process data
 
@@ -187,10 +100,10 @@ c_gridding.gridding(
               ctypes.c_int(grid_size),
               ctypes.c_int(w_support),
               ctypes.c_double(num_w_planes),
-              ctypes.c_int(vis.shape[2]),
-              ctypes.c_int(vis.shape[1]),
+              ctypes.c_int(polarisations),
+              ctypes.c_int(nchan),
               ctypes.c_void_p(vis_ser_real.ctypes.data),
-              ctypes.c_void_p(vis_ser_img.ctypes.data),
+              ctypes.c_void_p(vis_ser_imag.ctypes.data),
               ctypes.c_void_p(weight_ser.ctypes.data),
               ctypes.c_double(minv),
               ctypes.c_double(maxv)
@@ -209,7 +122,7 @@ c_fft.fftw_data(
    ctypes.c_void_p(grid.ctypes.data),
    ctypes.c_void_p(gridss.ctypes.data)
 )
-'''
+
 c_phasecorr.phase_correction(
    ctypes.c_void_p(gridss.ctypes.data),
    ctypes.c_void_p(image_real.ctypes.data),
@@ -225,10 +138,7 @@ c_phasecorr.phase_correction(
    ctypes.c_int(size),
    ctypes.c_int(rank)
 )
-
-
-tprocess = time.time() - t0
-
+'''
 
 # reduce results
 '''
@@ -273,10 +183,3 @@ if rank == 0:
 #f.close()
 
 # close MS
-ms.close()
-
-# reporting timings
-readtime = readtime1-readtime0
-if rank == 0:
-   print("Read time:       ",readtime)
-   print("Process time:    ",tprocess)

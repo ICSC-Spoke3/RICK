@@ -1,5 +1,5 @@
 
-#include "/iranet/soft/openmpi/openmpi-5.0.1/include/mpi.h"
+#include <mpi.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -91,7 +91,7 @@ void initialize_array(
   // !! error is down here !!
   //x
 
-  sectorarray = custom_malloc((nsectors+1)*sizeof(unsigned int));
+  *sectorarray = custom_malloc((nsectors+1)*sizeof(unsigned int*));
   if (*sectorarray == NULL) {
     fprintf(stderr, "Error allocating memory for sectorarray\n");
   exit(EXIT_FAILURE);
