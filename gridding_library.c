@@ -15,34 +15,6 @@
 
 #define NOT_ENOUGH_MEM_STACKING   3
 
-
-
-size_t total_allocated_memory = 0;
-
-void* custom_malloc(size_t size) {
-    total_allocated_memory += size;
-    return malloc(size);
-}
-
-void custom_free(void* ptr, size_t size) {
-    total_allocated_memory -= size;
-    free(ptr);
-}
-
-void* custom_calloc(size_t num, size_t size) {
-    total_allocated_memory += (num * size);
-    return calloc(num, size);
-}
-
-
-void print_memory_usage() {
-    printf("Current total allocated memory: %zu bytes\n", total_allocated_memory);
-}
-
-
-
-
-
 void initialize_array(
     int nsectors,
     int nmeasures,
@@ -50,13 +22,12 @@ void initialize_array(
     double* vv,
     int yaxis,
     double dx,
-    unsigned int **histo_send,
-    unsigned int ***sectorarray
+    int **histo_send,
+    int ***sectorarray
 )
 {
   printf("Beginning of _initialize_array_ function\n");
-  *histo_send = custom_calloc(nsectors+1, sizeof(unsigned int*));
-  print_memory_usage();
+  *histo_send = calloc(nsectors+1, sizeof(int));
 
   printf("w_supporth : %f \n", w_supporth);
   printf("nsectors : %d\n", nsectors);
@@ -64,26 +35,26 @@ void initialize_array(
   printf("nmeasures : %d\n", nmeasures);
   printf("vv[5] : %f\n", vv[5]);
 
-  for (unsigned int iphi = 0; iphi < nmeasures; iphi++)
+  for (int iphi = 0; iphi < nmeasures; iphi++)
     {
       double vvh = vv[iphi];
-      printf("vvh = %f\n", vvh);              //less or equal to 0.6
+      //printf("vvh = %f\n", vvh);              //less or equal to 0.6
       int binphi = (int)(vvh*nsectors); //has values expect 0 and nsectors-1.
-      printf("binphi = %d\n", binphi);
+      //printf("binphi = %d\n", binphi);
       //So we use updist and downdist condition
 	
       // check if the point influences also neighboring slabs
       double updist   = (double)((binphi+1)*yaxis)*dx - vvh;
-      printf("updist = %f\n", updist);
+      //printf("updist = %f\n", updist);
       double downdist = vvh - (double)(binphi*yaxis)*dx;
-      printf("downdist = %f\n", downdist);
+      //printf("downdist = %f\n", downdist);
       //
       (histo_send)[binphi]++;
       if(updist < w_supporth && updist >= 0.0)
-	      (histo_send)[binphi+1]++;
+	      (*histo_send)[binphi+1]++;
 	
       if(downdist < w_supporth && binphi > 0 && downdist >= 0.0)
-	      (histo_send)[binphi-1]++;
+	      (*histo_send)[binphi-1]++;
     }
 
   printf("Just before first malloc()...\n");
@@ -91,30 +62,29 @@ void initialize_array(
   // !! error is down here !!
   //x
 
-  *sectorarray = custom_malloc((nsectors+1)*sizeof(unsigned int*));
+  *sectorarray = malloc((nsectors+1)*sizeof(int*));
   if (*sectorarray == NULL) {
     fprintf(stderr, "Error allocating memory for sectorarray\n");
   exit(EXIT_FAILURE);
   }
 
   printf("Just before second malloc()...\n");
-  unsigned int  *counter = custom_calloc((nsectors+1), sizeof(unsigned int));
+  int  *counter = calloc((nsectors+1), sizeof(int));
   if (counter == NULL) {
     fprintf(stderr, "Error allocating memory for counter\n");
     exit(EXIT_FAILURE);
   }
 
   
-  for(unsigned int sec=0; sec<(nsectors+1); sec++)
+  for(int sec=0; sec<(nsectors+1); sec++)
     {
-      printf("(histo_send)[%d] = %d\n", sec, (histo_send)[sec]);
-      (sectorarray)[sec] = custom_calloc((*histo_send)[sec], sizeof(unsigned int));
+      printf("(histo_send)[%d] = %u\n", sec, (histo_send)[sec]);
+      (*sectorarray)[sec] = (int*)calloc((*histo_send)[sec], sizeof(int));
     }
-    print_memory_usage();
-    
-  
+
+
   printf("Just before _for_ loop\n");
-  for (unsigned int iphi = 0; iphi < nmeasures; iphi++)
+  for (int iphi = 0; iphi < nmeasures; iphi++)
     {
       double vvh      = vv[iphi];
       int    binphi   = (int)(vvh*nsectors);
@@ -129,8 +99,6 @@ void initialize_array(
 	(*sectorarray)[binphi-1][counter[binphi-1]] = iphi; counter[binphi-1]++; };
     }
 
-     print_memory_usage();
-
   free( counter );
     
  #ifdef VERBOSE
@@ -144,9 +112,9 @@ void initialize_array(
 
 void wstack(
 	    int num_w_planes,
-	    unsigned int num_points,
-	    unsigned int freq_per_chan,
-	    unsigned int polarizations,
+	    int num_points,
+	    int freq_per_chan,
+	    int polarizations,
 	    double* uu,
 	    double* vv,
 	    double* ww,
@@ -163,8 +131,8 @@ void wstack(
 	    int rank
     )
 {
-  unsigned int i;
-  //unsigned int index;
+  int i;
+  //int index;
   unsigned long long visindex;
   
   // initialize the convolution kernel
@@ -196,6 +164,8 @@ void wstack(
 #else
 #pragma omp parallel for private(visindex)
 #endif
+
+  printf("Before _for_ loop into _wstack_ function\n");
   for (i = 0; i < num_points; i++)
     {
 #ifdef _OPENMP
@@ -220,10 +190,10 @@ void wstack(
       int grid_v = (int)pos_v;
 
       // check the boundaries
-      unsigned int jmin = (grid_u > KernelLen - 1) ? grid_u - KernelLen : 0;
-      unsigned int jmax = (grid_u < grid_size_x - KernelLen) ? grid_u + KernelLen : grid_size_x - 1;
-      unsigned int kmin = (grid_v > KernelLen - 1) ? grid_v - KernelLen : 0;
-      unsigned int kmax = (grid_v < grid_size_y - KernelLen) ? grid_v + KernelLen : grid_size_y - 1;
+      int jmin = (grid_u > KernelLen - 1) ? grid_u - KernelLen : 0;
+      int jmax = (grid_u < grid_size_x - KernelLen) ? grid_u + KernelLen : grid_size_x - 1;
+      int kmin = (grid_v > KernelLen - 1) ? grid_v - KernelLen : 0;
+      int kmax = (grid_v < grid_size_y - KernelLen) ? grid_v + KernelLen : grid_size_y - 1;
       //printf("%d, %ld, %ld, %d, %ld, %ld\n",grid_u,jmin,jmax,grid_v,kmin,kmax);
 
 
@@ -238,7 +208,7 @@ void wstack(
             {
 	      double u_dist = (double)j+0.5 - pos_u;
 	      //double u_dist = (double)j - pos_u;
-	      unsigned int iKer = 2 * (j + k*grid_size_x + grid_w*grid_size_x*grid_size_y);
+	      int iKer = 2 * (j + k*grid_size_x + grid_w*grid_size_x*grid_size_y);
 	      int jKer = (int)(increaseprecision * (fabs(u_dist+(double)KernelLen)));
 	      int kKer = (int)(increaseprecision * (fabs(v_dist+(double)KernelLen)));
 
@@ -248,10 +218,10 @@ void wstack(
 	      double add_term_img = 0.0;
 	      unsigned long long ifine = visindex;
 	      // DAV: the following two loops are performend by each thread separately: no problems of race conditions
-	      for (unsigned int ifreq=0; ifreq<freq_per_chan; ifreq++)
+	      for (int ifreq=0; ifreq<freq_per_chan; ifreq++)
 		{
-		  unsigned int iweight = visindex/freq_per_chan;
-		  for (unsigned int ipol=0; ipol<polarizations; ipol++)
+		  int iweight = visindex/freq_per_chan;
+		  for (int ipol=0; ipol<polarizations; ipol++)
 		    {
                       if (!isnan(vis_real[ifine]))
 			{
@@ -279,10 +249,10 @@ void wstack(
 }
 
 
-void free_array( unsigned int *histo_send, unsigned int ***sectorarrays, int nsectors )
+void free_array( int *histo_send, int ***sectorarrays, int nsectors )
 
 { 
-  for ( unsigned int i = nsectors-1; i > 0; i-- )
+  for ( int i = nsectors-1; i > 0; i-- )
     free( (*sectorarrays)[i] );
 
   free( *sectorarrays );
@@ -320,9 +290,9 @@ void gridding_data(
     double* gridss,
     float* visreal,
     float* visimg,
-    unsigned int* histo_send,
+    int* histo_send,
     float* weights,
-    unsigned int ***sectorarray,
+    int ***sectorarray,
     MPI_Comm MYMYMPI_COMM
 )
 //
@@ -395,12 +365,12 @@ void gridding_data(
   // find the largest value in histo_send[]
   //
   
-  for (unsigned int isector = 0; isector < size; isector++)
+  for (int isector = 0; isector < size; isector++)
     {
       //double start = CPU_TIME_wt;
 
-      unsigned int Nsec            = histo_send[isector];
-      unsigned int Nweightss       = Nsec*polarisations;
+      int Nsec            = histo_send[isector];
+      int Nweightss       = Nsec*polarisations;
       unsigned long long Nvissec         = Nweightss*freq_per_chan;
       double_t *memory     = (double*) malloc ( (Nsec*3)*sizeof(double_t) +
 						(Nvissec*2+Nweightss)*sizeof(float_t) );
@@ -416,26 +386,26 @@ void gridding_data(
       float_t  *visimgs    = (float_t*)visreals + Nvissec;
   
       // select data for this sector
-      unsigned int icount = 0;
-      unsigned int ip = 0;
-      unsigned int inu = 0;
+      int icount = 0;
+      int ip = 0;
+      int inu = 0;
 
       #warning "this loop should be threaded"
       #warning "the counter of this loop should not be int"
       for( int iphi = histo_send[isector]-1; iphi >=0 ; iphi--)
         {
 	  
-	  unsigned int ilocal = (*sectorarray)[isector][iphi];
+	  int ilocal = (*sectorarray)[isector][iphi];
 
 	  uus[icount] = uu[ilocal];
 	  vvs[icount] = vv[ilocal]-isector*shift;
 	  wws[icount] = ww[ilocal];
-	  for (unsigned int ipol=0; ipol<polarisations; ipol++)
+	  for (int ipol=0; ipol<polarisations; ipol++)
 	    {
 	      weightss[ip] = weights[ilocal*polarisations+ipol];
 	      ip++;
 	    }
-	  for (unsigned int ifreq=0; ifreq<polarisations*freq_per_chan; ifreq++)
+	  for (int ifreq=0; ifreq<polarisations*freq_per_chan; ifreq++)
 	    {
 	      visreals[inu] = visreal[ilocal*polarisations*freq_per_chan+ifreq];
 	      visimgs[inu]  = visimg[ilocal*polarisations*freq_per_chan+ifreq];
@@ -457,7 +427,7 @@ void gridding_data(
 	double my_vvmax = -1e20;
 
        #pragma omp for 
-	for (unsigned int ipart=0; ipart<Nsec; ipart++)
+	for (int ipart=0; ipart<Nsec; ipart++)
 	  {
 	    my_uumin = MIN(my_uumin, uus[ipart]);
 	    my_uumax = MAX(my_uumax, uus[ipart]);
@@ -489,6 +459,8 @@ void gridding_data(
 	stacking_target_array = grid;
 
       //start = CPU_TIME_wt;
+
+      printf("Calling _wstack_ function\n");
 	    
      //We have to call different GPUs per MPI task!!! [GL]
       wstack(num_w_planes,
@@ -595,7 +567,7 @@ void gridding(
     int grid_size_x,
     int grid_size_y,
     int w_support,
-    double num_w_planes,
+    int num_w_planes,
     int polarisations,
     int freq_per_chan,
     float* visreal,
@@ -621,8 +593,8 @@ void gridding(
   double w_supporth = (double)((w_support-1)/2)*dx;
   //printf("w_supporth outside : %f\n", w_supporth);
 
-  unsigned int *histo_send = NULL;
-  unsigned int **sectorarray = NULL;
+  int *histo_send = NULL;
+  int **sectorarray = NULL;
 
 /*
   test_malloc(
@@ -681,7 +653,7 @@ void gridding(
   
   //timing_wt.gridding += CPU_TIME_wt - start;
   
-  free_array( histo_send, &sectorarray, size );
+  free_array( &histo_send, &sectorarray, size );
   
   MPI_Barrier(MYMPI_COMM);
   
