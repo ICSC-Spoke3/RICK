@@ -29,11 +29,11 @@ void initialize_array(
   printf("Beginning of _initialize_array_ function\n");
   *histo_send = calloc(nsectors+1, sizeof(int));
 
-  printf("w_supporth : %f \n", w_supporth);
-  printf("nsectors : %d\n", nsectors);
-  printf("yaxis : %d\n", yaxis);
-  printf("nmeasures : %d\n", nmeasures);
-  printf("vv[5] : %f\n", vv[5]);
+  //printf("w_supporth : %f \n", w_supporth);
+  //printf("nsectors : %d\n", nsectors);
+  //printf("yaxis : %d\n", yaxis);
+  //printf("nmeasures : %d\n", nmeasures);
+  //printf("vv[5] : %f\n", vv[5]);
 
   for (int iphi = 0; iphi < nmeasures; iphi++)
     {
@@ -249,9 +249,10 @@ void wstack(
 }
 
 
-void free_array( int *histo_send, int ***sectorarrays, int nsectors )
+void free_array( int **histo_send, int ***sectorarrays, int nsectors )
 
 { 
+  printf("Beginning of _free_array_ function\n");
   for ( int i = nsectors-1; i > 0; i-- )
     free( (*sectorarrays)[i] );
 
