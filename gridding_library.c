@@ -22,12 +22,12 @@ void initialize_array(
     double* vv,
     int yaxis,
     double dx,
-    int **histo_send,
-    int ***sectorarray
+    int *histo_send,
+    int **sectorarray
 )
 {
   printf("Beginning of _initialize_array_ function\n");
-  *histo_send = calloc(nsectors+1, sizeof(int));
+  histo_send = (int*)calloc(nsectors+1, sizeof(int));
 
   //printf("w_supporth : %f \n", w_supporth);
   //printf("nsectors : %d\n", nsectors);
@@ -51,10 +51,10 @@ void initialize_array(
       //
       (histo_send)[binphi]++;
       if(updist < w_supporth && updist >= 0.0)
-	      (*histo_send)[binphi+1]++;
+	      (histo_send)[binphi+1]++;
 	
       if(downdist < w_supporth && binphi > 0 && downdist >= 0.0)
-	      (*histo_send)[binphi-1]++;
+	      (histo_send)[binphi-1]++;
     }
 
   printf("Just before first malloc()...\n");
@@ -79,7 +79,7 @@ void initialize_array(
   for(int sec=0; sec<(nsectors+1); sec++)
     {
       printf("(histo_send)[%d] = %u\n", sec, (histo_send)[sec]);
-      (*sectorarray)[sec] = (int*)calloc((*histo_send)[sec], sizeof(int));
+      sectorarray[sec] = (int*)calloc((histo_send)[sec], sizeof(int));
     }
 
 
@@ -90,13 +90,13 @@ void initialize_array(
       int    binphi   = (int)(vvh*nsectors);
       double updist   = (double)((binphi+1)*yaxis)*dx - vvh;
       double downdist = vvh - (double)(binphi*yaxis)*dx;
-      (*sectorarray)[binphi][counter[binphi]] = iphi;
+      (sectorarray)[binphi][counter[binphi]] = iphi;
       counter[binphi]++;
 	
       if(updist < w_supporth && updist >= 0.0) {
-	(*sectorarray)[binphi+1][counter[binphi+1]] = iphi; counter[binphi+1]++; };
+	(sectorarray)[binphi+1][counter[binphi+1]] = iphi; counter[binphi+1]++; };
       if(downdist < w_supporth && binphi > 0 && downdist >= 0.0) {
-	(*sectorarray)[binphi-1][counter[binphi-1]] = iphi; counter[binphi-1]++; };
+	(sectorarray)[binphi-1][counter[binphi-1]] = iphi; counter[binphi-1]++; };
     }
 
   free( counter );
@@ -616,8 +616,8 @@ void gridding(
     vv,
     yaxis,
     dx,
-    &histo_send,
-    &sectorarray);
+    histo_send,
+    sectorarray);
 
   //timing_wt.init += CPU_TIME_wt - start;
 
