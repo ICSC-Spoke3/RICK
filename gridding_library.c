@@ -1,4 +1,3 @@
-
 #include <mpi.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -15,16 +14,17 @@
 
 #define NOT_ENOUGH_MEM_STACKING   3
 
+int* histo_send;
+int** sectorarray;
+
 void initialize_array(
     int nsectors,
     int nmeasures,
     double w_supporth,
     double* vv,
     int yaxis,
-    double dx,
-    int *histo_send,
-    int **sectorarray
-)
+    double dx
+		      )
 {
   printf("Beginning of _initialize_array_ function\n");
   histo_send = (int*)calloc(nsectors+1, sizeof(int));
@@ -62,8 +62,8 @@ void initialize_array(
   // !! error is down here !!
   //x
 
-  *sectorarray = malloc((nsectors+1)*sizeof(int*));
-  if (*sectorarray == NULL) {
+  sectorarray = (int**)malloc((nsectors+1)*sizeof(int*));
+  if (sectorarray == NULL) {
     fprintf(stderr, "Error allocating memory for sectorarray\n");
   exit(EXIT_FAILURE);
   }
@@ -249,14 +249,14 @@ void wstack(
 }
 
 
-void free_array( int **histo_send, int ***sectorarrays, int nsectors )
+void free_array( int *histo_send, int **sectorarrays, int nsectors )
 
 { 
   printf("Beginning of _free_array_ function\n");
   for ( int i = nsectors-1; i > 0; i-- )
-    free( (*sectorarrays)[i] );
+    free( sectorarrays[i] );
 
-  free( *sectorarrays );
+  free( sectorarrays );
 
   free( histo_send );
   
@@ -291,9 +291,7 @@ void gridding_data(
     double* gridss,
     float* visreal,
     float* visimg,
-    int* histo_send,
     float* weights,
-    int ***sectorarray,
     MPI_Comm MYMYMPI_COMM
 )
 //
@@ -365,19 +363,22 @@ void gridding_data(
 
   // find the largest value in histo_send[]
   //
+
+  //printf("histo_send before loop %d\n", histo_send[0] );
   
   for (int isector = 0; isector < size; isector++)
     {
       //double start = CPU_TIME_wt;
-
+      
       int Nsec            = histo_send[isector];
       int Nweightss       = Nsec*polarisations;
       unsigned long long Nvissec         = Nweightss*freq_per_chan;
       double_t *memory     = (double*) malloc ( (Nsec*3)*sizeof(double_t) +
 						(Nvissec*2+Nweightss)*sizeof(float_t) );
 
+      
       //if ( memory == NULL )
-	//shutdown_wstacking(NOT_ENOUGH_MEM_STACKING, "Not enough memory for stacking", __FILE__, __LINE__);
+      //shutdown_wstacking(NOT_ENOUGH_MEM_STACKING, "Not enough memory for stacking", __FILE__, __LINE__);
   
       double_t *uus        = (double_t*) memory;
       double_t *vvs        = (double_t*) uus+Nsec;
@@ -396,7 +397,7 @@ void gridding_data(
       for( int iphi = histo_send[isector]-1; iphi >=0 ; iphi--)
         {
 	  
-	  int ilocal = (*sectorarray)[isector][iphi];
+	  int ilocal = sectorarray[isector][iphi];
 
 	  uus[icount] = uu[ilocal];
 	  vvs[icount] = vv[ilocal]-isector*shift;
@@ -594,9 +595,6 @@ void gridding(
   double w_supporth = (double)((w_support-1)/2)*dx;
   //printf("w_supporth outside : %f\n", w_supporth);
 
-  int *histo_send = NULL;
-  int **sectorarray = NULL;
-
 /*
   test_malloc(
     nmeasures,
@@ -615,14 +613,13 @@ void gridding(
     w_supporth,
     vv,
     yaxis,
-    dx,
-    histo_send,
-    sectorarray);
+    dx);
 
   //timing_wt.init += CPU_TIME_wt - start;
 
   printf("Calling _gridding_data_ function\n");
-  
+
+    
   //Sector and Gridding data
   gridding_data(
     dx,
@@ -646,17 +643,16 @@ void gridding(
     gridss,
     visreal,
     visimg,
-    histo_send,
     weights,
-    &sectorarray,
     MYMPI_COMM
   );
   
   //timing_wt.gridding += CPU_TIME_wt - start;
-  
-  free_array( &histo_send, &sectorarray, size );
-  
-  MPI_Barrier(MYMPI_COMM);
+
+  free_array( histo_send, sectorarray, size );
+
+  if (size>1)
+    MPI_Barrier(MYMPI_COMM);
   
   return;
 }
