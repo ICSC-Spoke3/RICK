@@ -22,12 +22,12 @@ print("Run with N. threads = ",num_threads)
 # set-up the C-python environment
 import ctypes
 so_gridding = "./gridding.so"
-so_fft = "./fft.so"
+#so_fft = "./fft.so"
 so_phasecorr = "./phasecorr.so"
 
 c_gridding = ctypes.cdll.LoadLibrary(so_gridding)
 #c_fft = ctypes.cdll.LoadLibrary(so_fft)
-#c_phasecorr = ctypes.cdll.LoadLibrary(so_phasecorr)
+c_phasecorr = ctypes.cdll.LoadLibrary(so_phasecorr)
 
 
 
@@ -62,18 +62,18 @@ with open('newgauss2noconj_t201806301100_SBL180.binMS/meta.txt', 'r') as metafil
 
 metafile.close()
 
-print(num_points)
-print(num_vis)
-print(nchan)
-print(polarisations)
+#print(num_points)
+#print(num_vis)
+#print(nchan)
+#print(polarisations)
 
 # set convolutional kernel parameters full size 
 w_support = 7
 
 # set parameters
-num_points = 10
+#num_points = 10
 num_w_planes = 1 
-grid_size = 64    # number of cells of the grid
+grid_size = 512   # number of cells of the grid
 
 
 
@@ -84,11 +84,11 @@ uu_ser = uu.flatten()
 vv_ser = vv.flatten()
 ww_ser = ww.flatten()
 weight_ser = weight.flatten()
-grid = np.zeros(2*num_w_planes*grid_size*grid_size)  # complex!
-gridss = np.zeros(2*num_w_planes*grid_size*grid_size)
+grid = np.zeros(2*num_w_planes*grid_size*grid_size, dtype=np.float64)  # complex!
+gridss = np.zeros(2*num_w_planes*grid_size*grid_size, dtype=np.float64)
 gridtot = np.zeros(2*num_w_planes*grid_size*grid_size)  # complex!
-image_real = np.zeros(num_w_planes*grid_size*grid_size)
-image_imag = np.zeros(num_w_planes*grid_size*grid_size)
+image_real = np.zeros(num_w_planes*grid_size*grid_size, dtype=np.float64)
+image_imag = np.zeros(num_w_planes*grid_size*grid_size, dtype=np.float64)
 
 # normalize uv
 minu = np.amin(uu_ser)
@@ -140,6 +140,9 @@ c_fft.fftw_data(
    ctypes.c_void_p(gridss.ctypes.data)
 )
 
+print("FFT done!")
+'''
+
 c_phasecorr.phase_correction(
    ctypes.c_void_p(gridss.ctypes.data),
    ctypes.c_void_p(image_real.ctypes.data),
@@ -153,9 +156,10 @@ c_phasecorr.phase_correction(
    ctypes.c_double(maxv),
    ctypes.c_int(num_threads),
    ctypes.c_int(size),
-   ctypes.c_int(rank)
+   ctypes.c_int(rank),
+   ctypes.c_void_p(comm)
 )
-'''
+print("Phase correction done!")
 
 # reduce results
 '''
@@ -175,7 +179,7 @@ print("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
 #hist, bin_edges = np.histogram(ww_ser,10)
 #print(hist)
 
-
+'''
 if rank == 0:
  outfile = "grid"+str(rank)+".txt"
  f = open(outfile, 'w')
@@ -186,10 +190,10 @@ if rank == 0:
          for iu in range(grid_size):
             index = 2*(iu + iv*grid_size + iw*grid_size*grid_size)
 
-            v_norm = np.sqrt(gridtot[index]*gridtot[index]+gridtot[index+1]*gridtot[index+1])
-            f.writelines(str(iu)+" "+str(iv)+" "+str(iw)+" "+str(gridtot[index])+" "+str(gridtot[index+1])+" "+str(v_norm)+"\n")
+            v_norm = np.sqrt(gridss[index]*gridss[index]+gridss[index+1]*gridss[index+1])
+            f.writelines(str(iu)+" "+str(iv)+" "+str(iw)+" "+str(gridss[index])+" "+str(gridss[index+1])+" "+str(v_norm)+"\n")
  f.close()
-
+'''
 #outfile = "data"+str(rank)+".txt"
 #f = open(outfile, 'w')
 #
