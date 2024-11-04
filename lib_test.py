@@ -3,8 +3,13 @@ USE_MPI = 1
 import numpy as np
 import time
 import sys
+import ctypes
 if USE_MPI == 1:
    from mpi4py import MPI
+   if MPI._sizeof(MPI.Comm) == ctypes.sizeof(ctypes.c_int):
+      MPI_Comm = ctypes.c_int
+   else:
+      MPI_Comm = ctypes.c_void_p
    comm = MPI.COMM_WORLD
    rank = comm.Get_rank()
    size = comm.Get_size()
@@ -20,7 +25,7 @@ if len(sys.argv) > 1:
 print("Run with N. threads = ",num_threads)
 
 # set-up the C-python environment
-import ctypes
+#import ctypes
 so_gridding = "./gridding.so"
 so_fft = "./fft.so"
 so_phasecorr = "./phasecorr.so"
@@ -102,7 +107,7 @@ c_gridding.gridding(
    ctypes.c_void_p(ww_ser.ctypes.data),
    grid.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
    gridss.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
-   ctypes.py_object(comm),
+   ctypes.c_void_p(comm.handle),
    ctypes.c_int(num_threads),
    ctypes.c_int(grid_size),
    ctypes.c_int(grid_size),
@@ -119,13 +124,12 @@ c_gridding.gridding(
 
 print("Gridding done!")
 
-
 c_fft.fftw_data(
    ctypes.c_int(grid_size),
    ctypes.c_int(grid_size),
-   ctypes.c_double(num_w_planes),
+   ctypes.c_int(num_w_planes),
    ctypes.c_int(num_threads),
-   ctypes.py_object(comm),
+   ctypes.c_void_p(comm.handle),
    ctypes.c_int(size),
    ctypes.c_int(rank),
    grid.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
@@ -136,7 +140,7 @@ print("FFT done!")
 
 
 c_phasecorr.phase_correction(
-   grid.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+   gridss.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
    ctypes.c_void_p(image_real.ctypes.data),
    ctypes.c_void_p(image_imag.ctypes.data),
    ctypes.c_double(num_w_planes),
@@ -149,7 +153,7 @@ c_phasecorr.phase_correction(
    ctypes.c_int(num_threads),
    ctypes.c_int(size),
    ctypes.c_int(rank),
-   ctypes.py_object(comm)
+   ctypes.c_void_p(comm.handle)
 )
 print("Phase correction done!")
 
