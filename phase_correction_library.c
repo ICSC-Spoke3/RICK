@@ -28,7 +28,7 @@ void phase_correction(
     double uvmin,
     double uvmax,
     int num_threads,
-    int nsectors,
+    int size,
     int rank,
     MPI_Comm MYMPI_COMM)
 {
@@ -39,12 +39,12 @@ void phase_correction(
   double dwnorm = dw / (wmax - wmin);
 
   int xaxis = xaxistot;
-  int yaxis = yaxistot / nsectors;
+  int yaxis = yaxistot / size;
 
   double resolution = 1.0 / MAX(fabs(uvmin), fabs(uvmax));
 
-	FILE * pFilereal;
-	FILE * pFileimg;
+  FILE *pFilereal;
+  FILE *pFileimg;
   char fftfile2[FILENAMELENGTH] = "fft_real.bin";
   char fftfile3[FILENAMELENGTH] = "fft_img.bin";
 
@@ -116,14 +116,14 @@ void phase_correction(
         {
 #pragma omp atomic
           image_real[img_index] += gridss[index];
-          //printf("image_real[%d] = %f\n", img_index, image_real[img_index]);
+          // printf("image_real[%d] = %f\n", img_index, image_real[img_index]);
 #pragma omp atomic
           image_imag[img_index] += gridss[index + 1];
         }
 #else
 #pragma omp atomic
         image_real[img_index] += gridss[index];
-        //printf("image_real[%d] = %f\n", img_index, image_real[img_index]);
+        // printf("image_real[%d] = %f\n", img_index, image_real[img_index]);
 #pragma omp atomic
         image_imag[img_index] += gridss[index + 1];
 #endif // end of PHASE_ON
@@ -237,7 +237,10 @@ void phase_correction(
     fclose(pFileimg);
   }
 
-  //MPI_Barrier(MYMPI_COMM);
+  if (size > 1)
+  {
+    MPI_Barrier(MYMPI_COMM);
+  }
 
   if (rank == 0)
     printf("WRITING IMAGE\n");
@@ -279,5 +282,8 @@ void phase_correction(
   fclose(pFilereal);
   fclose(pFileimg);
 
-  //MPI_Barrier(MYMPI_COMM);
+  if (size > 1)
+  {
+    MPI_Barrier(MYMPI_COMM);
+  }
 }

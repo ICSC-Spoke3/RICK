@@ -22,11 +22,11 @@ print("Run with N. threads = ",num_threads)
 # set-up the C-python environment
 import ctypes
 so_gridding = "./gridding.so"
-#so_fft = "./fft.so"
+so_fft = "./fft.so"
 so_phasecorr = "./phasecorr.so"
 
 c_gridding = ctypes.cdll.LoadLibrary(so_gridding)
-#c_fft = ctypes.cdll.LoadLibrary(so_fft)
+c_fft = ctypes.cdll.LoadLibrary(so_fft)
 c_phasecorr = ctypes.cdll.LoadLibrary(so_phasecorr)
 
 
@@ -62,19 +62,12 @@ with open('newgauss2noconj_t201806301100_SBL180.binMS/meta.txt', 'r') as metafil
 
 metafile.close()
 
-#print(num_points)
-#print(num_vis)
-#print(nchan)
-#print(polarisations)
-
 # set convolutional kernel parameters full size 
 w_support = 7
 
 # set parameters
-#num_points = 10
 num_w_planes = 1 
-grid_size = 512   # number of cells of the grid
-
+grid_size = 1024   # number of cells of the grid
 
 
 # serialize arrays
@@ -90,6 +83,7 @@ gridtot = np.zeros(2*num_w_planes*grid_size*grid_size)  # complex!
 image_real = np.zeros(num_w_planes*grid_size*grid_size, dtype=np.float64)
 image_imag = np.zeros(num_w_planes*grid_size*grid_size, dtype=np.float64)
 
+
 # normalize uv
 minu = np.amin(uu_ser)
 maxu = np.amax(uu_ser)
@@ -98,32 +92,30 @@ maxv = np.amax(vv_ser)
 minw = np.amin(ww_ser)
 maxw = np.amax(ww_ser)
 
-# process data
-
 
 c_gridding.gridding(
-              ctypes.c_int(rank),
-              ctypes.c_int(size),
-              ctypes.c_int(num_points),
-              ctypes.c_void_p(uu_ser.ctypes.data),
-              ctypes.c_void_p(vv_ser.ctypes.data),
-              ctypes.c_void_p(ww_ser.ctypes.data),
-              ctypes.c_void_p(grid.ctypes.data),
-              ctypes.c_void_p(gridss.ctypes.data),
-              ctypes.c_void_p(comm),
-              ctypes.c_int(num_threads),
-              ctypes.c_int(grid_size),
-              ctypes.c_int(grid_size),
-              ctypes.c_int(w_support),
-              ctypes.c_int(num_w_planes),
-              ctypes.c_int(polarisations),
-              ctypes.c_int(nchan),
-              ctypes.c_void_p(vis_ser_real.ctypes.data),
-              ctypes.c_void_p(vis_ser_imag.ctypes.data),
-              ctypes.c_void_p(weight_ser.ctypes.data),
-              ctypes.c_double(minv),
-              ctypes.c_double(maxv)
-              )
+   ctypes.c_int(rank),
+   ctypes.c_int(size),
+   ctypes.c_int(num_points),
+   ctypes.c_void_p(uu_ser.ctypes.data),
+   ctypes.c_void_p(vv_ser.ctypes.data),
+   ctypes.c_void_p(ww_ser.ctypes.data),
+   grid.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+   gridss.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+   ctypes.c_void_p(comm),
+   ctypes.c_int(num_threads),
+   ctypes.c_int(grid_size),
+   ctypes.c_int(grid_size),
+   ctypes.c_int(w_support),
+   ctypes.c_int(num_w_planes),
+   ctypes.c_int(polarisations),
+   ctypes.c_int(nchan),
+   ctypes.c_void_p(vis_ser_real.ctypes.data),
+   ctypes.c_void_p(vis_ser_imag.ctypes.data),
+   ctypes.c_void_p(weight_ser.ctypes.data),
+   ctypes.c_double(minv),
+   ctypes.c_double(maxv)
+   )
 
 print("Gridding done!")
 
@@ -136,15 +128,15 @@ c_fft.fftw_data(
    ctypes.c_void_p(comm),
    ctypes.c_int(size),
    ctypes.c_int(rank),
-   ctypes.c_void_p(grid.ctypes.data),
-   ctypes.c_void_p(gridss.ctypes.data)
+   grid.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
+   gridss.ctypes.data_as(ctypes.POINTER(ctypes.c_double))
 )
 
 print("FFT done!")
 '''
 
 c_phasecorr.phase_correction(
-   ctypes.c_void_p(gridss.ctypes.data),
+   grid.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
    ctypes.c_void_p(image_real.ctypes.data),
    ctypes.c_void_p(image_imag.ctypes.data),
    ctypes.c_double(num_w_planes),
