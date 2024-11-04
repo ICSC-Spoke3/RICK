@@ -1,4 +1,4 @@
-USE_MPI = 0
+USE_MPI = 1
 
 import numpy as np
 import time
@@ -102,7 +102,7 @@ c_gridding.gridding(
    ctypes.c_void_p(ww_ser.ctypes.data),
    grid.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
    gridss.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
-   ctypes.c_void_p(comm),
+   ctypes.py_object(comm),
    ctypes.c_int(num_threads),
    ctypes.c_int(grid_size),
    ctypes.c_int(grid_size),
@@ -119,13 +119,13 @@ c_gridding.gridding(
 
 print("Gridding done!")
 
-'''
+
 c_fft.fftw_data(
    ctypes.c_int(grid_size),
    ctypes.c_int(grid_size),
    ctypes.c_double(num_w_planes),
    ctypes.c_int(num_threads),
-   ctypes.c_void_p(comm),
+   ctypes.py_object(comm),
    ctypes.c_int(size),
    ctypes.c_int(rank),
    grid.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
@@ -133,7 +133,7 @@ c_fft.fftw_data(
 )
 
 print("FFT done!")
-'''
+
 
 c_phasecorr.phase_correction(
    grid.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
@@ -149,7 +149,7 @@ c_phasecorr.phase_correction(
    ctypes.c_int(num_threads),
    ctypes.c_int(size),
    ctypes.c_int(rank),
-   ctypes.c_void_p(comm)
+   ctypes.py_object(comm)
 )
 print("Phase correction done!")
 
