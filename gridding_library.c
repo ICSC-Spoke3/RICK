@@ -5,7 +5,7 @@
 #include <math.h>
 #include <unistd.h>
 #include <stdatomic.h>
-/* #include <omp.h>  to be included after checking the MPI version works */
+#include <omp.h>  /*to be included after checking the MPI version works */
 
 #define PI 3.14159265359
 
@@ -219,13 +219,12 @@ void wstack(
 #pragma omp parallel for private(visindex)
 #endif
 
-  printf("Before _for_ loop into _wstack_ function\n");
   for (i = 0; i < num_points; i++)
   {
 #ifdef _OPENMP
-    // int tid;
-    // tid = omp_get_thread_num();
-    // printf("%d\n",tid);
+    //int tid;
+    //tid = omp_get_thread_num();
+    //printf("%d\n",tid);
 #endif
 
     visindex = i * freq_per_chan * polarizations;
@@ -304,7 +303,8 @@ void wstack(
 void free_array(int *histo_send, int **sectorarrays, int nsectors)
 
 {
-  printf("Beginning of _free_array_ function\n");
+  
+  //printf("Beginning of _free_array_ function\n");
   for (int i = nsectors - 1; i > 0; i--)
     free(sectorarrays[i]);
 
@@ -439,8 +439,6 @@ void gridding_data(
     else
       stacking_target_array = grid;
 
-    printf("Calling _wstack_ function\n");
-
     // We have to call different GPUs per MPI task!!! [GL]
     wstack(num_w_planes,
            Nsec,
@@ -473,10 +471,10 @@ void gridding_data(
 
       // Force to use MPI_Reduce when -fopenmp is not active
 #ifdef _OPENMP
-      if (reduce_method == REDUCE_MPI)
+      //if (reduce_method == REDUCE_MPI)
 
         MPI_Reduce(gridss, grid, size_of_grid, MPI_DOUBLE, MPI_SUM, target_rank, MYMYMPI_COMM);
-
+	/*
       else if (reduce_method == REDUCE_RING)
       {
 
@@ -495,6 +493,7 @@ void gridding_data(
       }
 #else
       MPI_Reduce(gridss, grid, size_of_grid, MPI_DOUBLE, MPI_SUM, target_rank, MYMYMPI_COMM);
+	*/
 #endif
 
       // Go to next sector
@@ -549,7 +548,8 @@ void gridding(
   double dw = 1.0 / (double)num_w_planes;
   double w_supporth = (double)((w_support - 1) / 2) * dx;
 
-  printf("Calling _initialize_array_ function\n");
+  if (rank==0)
+    printf("Calling _initialize_array_ function\n");
 
   // Create histograms and linked lists
 
@@ -562,7 +562,8 @@ void gridding(
       yaxis,
       dx);
 
-  printf("Calling _gridding_data_ function\n");
+  if (rank==0)
+    printf("Calling _gridding_data_ function\n");
   // Sector and Gridding data
   gridding_data(
       dx,

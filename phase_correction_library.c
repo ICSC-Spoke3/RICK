@@ -8,7 +8,7 @@
 #ifdef FITSIO
 #include "fitsio.h"
 #endif
-/* #include <omp.h>  to be included after checking the MPI version works */
+#include <omp.h>  /*to be included after checking the MPI version works */
 
 #define PI 3.14159265359
 #define FILENAMELENGTH 30
@@ -20,7 +20,7 @@ void phase_correction(
     double *gridss,
     double *image_real,
     double *image_imag,
-    double num_w_planes,
+    int num_w_planes,
     int xaxistot,
     int yaxistot,
     double wmin,
@@ -32,7 +32,8 @@ void phase_correction(
     int rank,
     MPI_Comm MYMPI_COMM)
 {
-  printf("RICK PHASE CORRECTION\n");
+  if (rank==0)
+    printf("RICK PHASE CORRECTION\n");
 
   double dw = (wmax - wmin) / (double)num_w_planes;
   double wterm = wmin + 0.5 * dw;
@@ -62,73 +63,80 @@ void phase_correction(
   omp_set_num_threads(num_threads);
 #endif
 
+  //OMP debugging verification
+  /*
+#pragma omp parallel
+  {
+    printf("Hello from thread %d out of %d of task %d\n", omp_get_thread_num(), omp_get_num_threads(), rank);
+  }
+  */
 #pragma omp parallel for collapse(2) private(wterm)
   for (int iw = 0; iw < num_w_planes; iw++)
-  {
-    for (int iv = 0; iv < yaxis; iv++)
-      for (int iu = 0; iu < xaxis; iu++)
-      {
+    {
+      for (int iv = 0; iv < yaxis; iv++)
+	for (int iu = 0; iu < xaxis; iu++)
+	  {
 
-        unsigned int index = 2 * (iu + iv * xaxis + xaxis * yaxis * iw);
-        unsigned int img_index = iu + iv * xaxis;
-        wterm = wmin + iw * dw;
+	    unsigned int index = 2 * (iu + iv * xaxis + xaxis * yaxis * iw);
+	    unsigned int img_index = iu + iv * xaxis;
+	    wterm = wmin + iw * dw;
 #ifdef PHASE_ON
-        if (num_w_planes > 1)
-        {
-          double xcoord = (double)(iu - xaxistot / 2);
-          if (xcoord < 0.0)
-            xcoord = (double)(iu + xaxistot / 2);
-          xcoord = sin(xcoord * resolution);
-          double ycoord = (double)(iv - yaxistot / 2);
-          if (ycoord < 0.0)
-            ycoord = (double)(iv + yaxistot / 2);
-          ycoord = sin(ycoord * resolution);
+	    if (num_w_planes > 1)
+	      {
+		double xcoord = (double)(iu - xaxistot / 2);
+		if (xcoord < 0.0)
+		  xcoord = (double)(iu + xaxistot / 2);
+		xcoord = sin(xcoord * resolution);
+		double ycoord = (double)(iv - yaxistot / 2);
+		if (ycoord < 0.0)
+		  ycoord = (double)(iv + yaxistot / 2);
+		ycoord = sin(ycoord * resolution);
 
-          double preal, pimag;
-          double radius2 = (xcoord * xcoord + ycoord * ycoord);
-          if (xcoord <= 1.0)
-          {
-            preal = cos(2.0 * PI * wterm * (sqrt(1 - radius2) - 1.0));
-            pimag = sin(2.0 * PI * wterm * (sqrt(1 - radius2) - 1.0));
-          }
-          else
-          {
-            preal = cos(-2.0 * PI * wterm * (sqrt(radius2 - 1.0) - 1));
-            pimag = 0.0;
-          }
+		double preal, pimag;
+		double radius2 = (xcoord * xcoord + ycoord * ycoord);
+		if (xcoord <= 1.0)
+		  {
+		    preal = cos(2.0 * PI * wterm * (sqrt(1 - radius2) - 1.0));
+		    pimag = sin(2.0 * PI * wterm * (sqrt(1 - radius2) - 1.0));
+		  }
+		else
+		  {
+		    preal = cos(-2.0 * PI * wterm * (sqrt(radius2 - 1.0) - 1));
+		    pimag = 0.0;
+		  }
 
-          preal = cos(2.0 * PI * wterm * (sqrt(1 - radius2) - 1.0));
-          pimag = sin(2.0 * PI * wterm * (sqrt(1 - radius2) - 1.0));
+		preal = cos(2.0 * PI * wterm * (sqrt(1 - radius2) - 1.0));
+		pimag = sin(2.0 * PI * wterm * (sqrt(1 - radius2) - 1.0));
 
-          double p, q, r, s;
-          p = gridss[index];
-          q = gridss[index + 1];
-          r = preal;
-          s = pimag;
+		double p, q, r, s;
+		p = gridss[index];
+		q = gridss[index + 1];
+		r = preal;
+		s = pimag;
 
-          // printf("%d %d %d %ld %ld\n",iu,iv,iw,index,img_index);
+		// printf("%d %d %d %ld %ld\n",iu,iv,iw,index,img_index);
 #pragma omp atomic
-          image_real[img_index] += (p * r - q * s) * dwnorm * sqrt(1 - radius2);
+		image_real[img_index] += (p * r - q * s) * dwnorm * sqrt(1 - radius2);
 #pragma omp atomic
-          image_imag[img_index] += (p * s + q * r) * dwnorm * sqrt(1 - radius2);
-        }
-        else
-        {
+		image_imag[img_index] += (p * s + q * r) * dwnorm * sqrt(1 - radius2);
+	      }
+	    else
+	      {
 #pragma omp atomic
-          image_real[img_index] += gridss[index];
-          // printf("image_real[%d] = %f\n", img_index, image_real[img_index]);
+		image_real[img_index] += gridss[index];
+		// printf("image_real[%d] = %f\n", img_index, image_real[img_index]);
 #pragma omp atomic
-          image_imag[img_index] += gridss[index + 1];
-        }
+		image_imag[img_index] += gridss[index + 1];
+	      }
 #else
 #pragma omp atomic
-        image_real[img_index] += gridss[index];
-        // printf("image_real[%d] = %f\n", img_index, image_real[img_index]);
+	    image_real[img_index] += gridss[index];
+	    // printf("image_real[%d] = %f\n", img_index, image_real[img_index]);
 #pragma omp atomic
-        image_imag[img_index] += gridss[index + 1];
+	    image_imag[img_index] += gridss[index + 1];
 #endif // end of PHASE_ON
-      }
-  }
+	  }
+    }
 
 #else
   omp_set_default_device(rank % omp_get_num_devices());

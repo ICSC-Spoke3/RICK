@@ -5,8 +5,12 @@
 #include <math.h>
 #include <unistd.h>
 #include <stdatomic.h>
-/* #include <omp.h>  to be included after checking the MPI version works */
+#include <omp.h>  /*to be included after checking the MPI version works */
 #include <fftw3-mpi.h>
+
+#ifdef _OPENMP
+#define HYBRID_FFTW
+#endif
 
 #define PI 3.14159265359
 
@@ -38,10 +42,16 @@ void fftw_data(
   ptrdiff_t alloc_local, local_n0, local_0_start;
   double norm = 1.0 / (double)(grid_size_x * grid_size_y);
 
+  
   // Use the hybrid MPI-OpenMP FFTW
+
 #ifdef HYBRID_FFTW
   fftw_plan_with_nthreads(num_threads);
 #endif
+
+  if (rank==0)
+    printf("Using %d threads for the FFT\n", num_threads);
+
   // map the 1D array of complex visibilities to a 2D array required by FFTW (complex[*][2])
   // x is the direction of contiguous data and maps to the second parameter
   // y is the parallelized direction and corresponds to the first parameter (--> n0)
@@ -49,12 +59,12 @@ void fftw_data(
   alloc_local = fftw_mpi_local_size_2d(grid_size_y, grid_size_x, MYMPI_COMM, &local_n0, &local_0_start);
   fftwgrid = fftw_alloc_complex(alloc_local);
   plan = fftw_mpi_plan_dft_2d(grid_size_y, grid_size_x, fftwgrid, fftwgrid, MYMPI_COMM, FFTW_BACKWARD, FFTW_ESTIMATE);
-
+  
   unsigned int fftwindex = 0;
   unsigned int fftwindex2D = 0;
   for (int iw = 0; iw < num_w_planes; iw++)
   {
-    // printf("FFTing plan %d\n",iw);
+    //printf("FFTing plan %d\n",iw);
     // select the w-plane to transform
 
 #ifdef HYBRID_FFTW
@@ -75,7 +85,7 @@ void fftw_data(
     fftw_execute(plan);
 
     // save the transformed w-plane
-
+    
 #ifdef HYBRID_FFTW
 #pragma omp parallel for collapse(2) num_threads(num_threads)
 #endif
@@ -94,9 +104,11 @@ void fftw_data(
 #ifdef HYBRID_FFTW
   fftw_cleanup_threads();
 #endif
+
   fftw_destroy_plan(plan);
   fftw_free(fftwgrid);
 
+  
   if (size > 1)
   {
     MPI_Barrier(MYMPI_COMM);

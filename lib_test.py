@@ -22,7 +22,8 @@ else:
 num_threads = 1
 if len(sys.argv) > 1:
     num_threads = int(sys.argv[1])
-print("Run with N. threads = ",num_threads)
+if rank == 0:
+   print("Run with N. threads = ",num_threads)
 
 # set-up the C-python environment
 #import ctypes
@@ -71,8 +72,8 @@ metafile.close()
 w_support = 7
 
 # set parameters
-num_w_planes = 1 
-grid_size = 1024   # number of cells of the grid
+num_w_planes = 2 
+grid_size = 2048   # number of cells of the grid
 
 
 # serialize arrays
@@ -122,7 +123,8 @@ c_gridding.gridding(
    ctypes.c_double(maxv)
    )
 
-print("Gridding done!")
+if rank == 0:
+   print("Gridding done!")
 
 c_fft.fftw_data(
    ctypes.c_int(grid_size),
@@ -136,14 +138,14 @@ c_fft.fftw_data(
    gridss.ctypes.data_as(ctypes.POINTER(ctypes.c_double))
 )
 
-print("FFT done!")
-
+if rank == 0:
+   print("FFT done!")
 
 c_phasecorr.phase_correction(
    gridss.ctypes.data_as(ctypes.POINTER(ctypes.c_double)),
    ctypes.c_void_p(image_real.ctypes.data),
    ctypes.c_void_p(image_imag.ctypes.data),
-   ctypes.c_double(num_w_planes),
+   ctypes.c_int(num_w_planes),
    ctypes.c_int(grid_size),
    ctypes.c_int(grid_size),
    ctypes.c_double(minw),
@@ -155,7 +157,9 @@ c_phasecorr.phase_correction(
    ctypes.c_int(rank),
    ctypes.c_void_p(comm.handle)
 )
-print("Phase correction done!")
+
+if rank == 0:
+   print("Phase correction done!")
 
 # reduce results
 '''
