@@ -47,10 +47,10 @@ void fftw_data(
 
 #ifdef HYBRID_FFTW
   fftw_plan_with_nthreads(num_threads);
-#endif
-
   if (rank==0)
     printf("Using %d threads for the FFT\n", num_threads);
+#endif
+
 
   // map the 1D array of complex visibilities to a 2D array required by FFTW (complex[*][2])
   // x is the direction of contiguous data and maps to the second parameter
@@ -84,6 +84,7 @@ void fftw_data(
     // do the transform for each w-plane
     fftw_execute(plan);
 
+    printf("plan executed\n");
     // save the transformed w-plane
     
 #ifdef HYBRID_FFTW
