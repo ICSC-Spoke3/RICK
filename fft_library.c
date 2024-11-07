@@ -1,18 +1,4 @@
-#include <mpi.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
-#include <math.h>
-#include <unistd.h>
-#include <stdatomic.h>
-#include <omp.h>  /*to be included after checking the MPI version works */
-#include <fftw3-mpi.h>
-
-#ifdef _OPENMP
-#define HYBRID_FFTW
-#endif
-
-#define PI 3.14159265359
+#include "fft.h"
 
 void fftw_data(
     int grid_size_x,
@@ -30,9 +16,8 @@ void fftw_data(
   if (rank == 0)
     printf("RICK FFT\n");
 
-  fftw_init_threads();
-  fftw_mpi_init();
-
+  FFT_INIT;
+  
   // double start = CPU_TIME_wt;
 
   int xaxis = grid_size_x;
@@ -102,10 +87,8 @@ void fftw_data(
     }
   }
 
-#ifdef HYBRID_FFTW
-  fftw_cleanup_threads();
-#endif
-
+  FFT_CLEANUP;
+  
   fftw_destroy_plan(plan);
   fftw_free(fftwgrid);
 
