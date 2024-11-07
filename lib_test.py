@@ -19,7 +19,7 @@ else:
    rank = 0
    size = 1
 
-num_threads = 1
+num_threads = 4
 if len(sys.argv) > 1:
     num_threads = int(sys.argv[1])
 if rank == 0:
@@ -72,8 +72,8 @@ metafile.close()
 w_support = 7
 
 # set parameters
-num_w_planes = 2 
-grid_size = 2048   # number of cells of the grid
+num_w_planes = 8
+grid_size = 4096   # number of cells of the grid
 
 
 # serialize arrays

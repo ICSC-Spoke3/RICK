@@ -30,6 +30,7 @@ void fftw_data(
   if (rank == 0)
     printf("RICK FFT\n");
 
+  fftw_init_threads();
   fftw_mpi_init();
 
   // double start = CPU_TIME_wt;
@@ -66,9 +67,9 @@ void fftw_data(
   {
     //printf("FFTing plan %d\n",iw);
     // select the w-plane to transform
-
+        
 #ifdef HYBRID_FFTW
-#pragma omp parallel for collapse(2) num_threads(num_threads)
+#pragma omp parallel for collapse(2) num_threads(num_threads) private(fftwindex,fftwindex2D)
 #endif
     for (int iv = 0; iv < yaxis; iv++)
     {
@@ -84,11 +85,10 @@ void fftw_data(
     // do the transform for each w-plane
     fftw_execute(plan);
 
-    printf("plan executed\n");
     // save the transformed w-plane
     
 #ifdef HYBRID_FFTW
-#pragma omp parallel for collapse(2) num_threads(num_threads)
+#pragma omp parallel for collapse(2) num_threads(num_threads) private(fftwindex,fftwindex2D)
 #endif
     for (int iv = 0; iv < yaxis; iv++)
     {
