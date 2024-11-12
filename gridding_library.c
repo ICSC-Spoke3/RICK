@@ -491,9 +491,10 @@ void gridding_data(
           shutdown_wstacking(ERR_REDUCE, message, __FILE__, __LINE__);
         }
       }
+	*/
 #else
       MPI_Reduce(gridss, grid, size_of_grid, MPI_DOUBLE, MPI_SUM, target_rank, MYMYMPI_COMM);
-	*/
+	
 #endif
 
       // Go to next sector
