@@ -1,4 +1,13 @@
-#include "fft.h"
+#include <mpi.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <math.h>
+#include <unistd.h>
+#include <stdatomic.h>
+#include <fftw3-mpi.h>
+#include "ricklib.h"
+#include <omp.h>
 
 void fftw_data(
     int grid_size_x,
@@ -14,7 +23,9 @@ void fftw_data(
 
   // FFT transform the data (using distributed FFTW)
   if (rank == 0)
+  {
     printf("RICK FFT\n");
+  }
 
   FFT_INIT;
   
@@ -86,13 +97,10 @@ void fftw_data(
       }
     }
   }
-
-  FFT_CLEANUP;
   
   fftw_destroy_plan(plan);
   fftw_free(fftwgrid);
 
-  
   if (size > 1)
   {
     MPI_Barrier(MYMPI_COMM);

@@ -5,7 +5,9 @@
 #include <math.h>
 #include <unistd.h>
 #include <stdatomic.h>
-#include <omp.h>  /*to be included after checking the MPI version works */
+#include "ricklib.h"
+#include <omp.h>
+
 
 #define PI 3.14159265359
 
@@ -97,7 +99,7 @@ void initialize_array(
     int yaxis,
     double dx)
 {
-  printf("Beginning of _initialize_array_ function\n");
+
   histo_send = (int *)calloc(nsectors + 1, sizeof(int));
 
   for (int iphi = 0; iphi < nmeasures; iphi++)
@@ -304,7 +306,6 @@ void free_array(int *histo_send, int **sectorarrays, int nsectors)
 
 {
   
-  //printf("Beginning of _free_array_ function\n");
   for (int i = nsectors - 1; i > 0; i--)
     free(sectorarrays[i]);
 
@@ -550,10 +551,8 @@ void gridding(
   double w_supporth = (double)((w_support - 1) / 2) * dx;
 
   if (rank==0)
-    printf("Calling _initialize_array_ function\n");
 
   // Create histograms and linked lists
-
   // Initialize linked list
   initialize_array(
       size,
@@ -563,8 +562,7 @@ void gridding(
       yaxis,
       dx);
 
-  if (rank==0)
-    printf("Calling _gridding_data_ function\n");
+
   // Sector and Gridding data
   gridding_data(
       dx,

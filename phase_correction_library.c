@@ -5,10 +5,12 @@
 #include <math.h>
 #include <unistd.h>
 #include <stdatomic.h>
+#include "ricklib.h"
+#include <omp.h>
 #ifdef FITSIO
 #include "fitsio.h"
 #endif
-#include <omp.h>  /*to be included after checking the MPI version works */
+//#include <omp.h>  /*to be included after checking the MPI version works */
 
 #define PI 3.14159265359
 #define FILENAMELENGTH 30
