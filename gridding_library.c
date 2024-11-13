@@ -550,8 +550,6 @@ void gridding(
   double dw = 1.0 / (double)num_w_planes;
   double w_supporth = (double)((w_support - 1) / 2) * dx;
 
-  if (rank==0)
-
   // Create histograms and linked lists
   // Initialize linked list
   initialize_array(
