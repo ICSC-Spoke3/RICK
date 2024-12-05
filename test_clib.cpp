@@ -4,8 +4,8 @@
 #include <string.h>
 #include <math.h>
 #include <unistd.h>
+#include <iostream>
 #include <stdatomic.h>
-#include <fftw3-mpi.h>
 #include <omp.h>
 #include "ricklib.h"
 #ifdef FITSIO
@@ -53,7 +53,7 @@ int main(int argc, char **argv)
   float *visimg;
 
   int Nmeasures;
-  int Nvis;
+  long Nvis;
   int Nweights;
   int freq_per_chan;
   int polarisations;
@@ -90,16 +90,36 @@ int main(int argc, char **argv)
   long naxis = 2;
   long naxes[2] = {grid_size_x, grid_size_y};
 
+  int num_threads;
+  
 #ifdef USE_MPI
+#ifdef _DOPENMP //Use MPI and OpenMP
+  int thread_level;
+  MPI_Init_thread(&argc, &argv, MPI_THREAD_FUNNELED, &thread_level);
+#else
   MPI_Init(&argc, &argv);
+#endif //_OPENMP
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+#ifdef _OPENMP
+  num_threads = omp_get_max_threads();
+#else
+  num_threads = 1;
+#endif //_OPENMP
+  
   if (rank == 0)
     printf("Running with %d MPI tasks\n", size);
 #else
   rank = 0;
   size = 1;
-#endif
+
+#ifdef _OPENMP
+  num_threads = omp_get_max_threads();
+#else
+  num_threads = 1;
+#endif //_OPENMP
+#endif //USE_MPI
 
   xaxis = grid_size_x;
   yaxis = grid_size_y / size;
@@ -112,11 +132,11 @@ int main(int argc, char **argv)
   strcpy(filename, datapath);
   strcat(filename, metafile);
   pFile = fopen(filename, "r");
-  fscanf(pFile, "%d", &Nmeasures);
-  fscanf(pFile, "%d", &Nvis);
+  fscanf(pFile, "%u", &Nmeasures);
+  fscanf(pFile, "%ld", &Nvis);
   fscanf(pFile, "%d", &freq_per_chan);
   fscanf(pFile, "%d", &polarisations);
-  fscanf(pFile, "%d", &Ntimes);
+  fscanf(pFile, "%u", &Ntimes);
   fscanf(pFile, "%lf", &dt);
   fscanf(pFile, "%lf", &thours);
   fscanf(pFile, "%ld", &baselines);
@@ -135,10 +155,14 @@ int main(int argc, char **argv)
   if (rank == size - 1)
     nm_pe = nm_pe + remaining;
 
+  Nmeasures = nm_pe;
+  Nvis = Nmeasures * freq_per_chan * polarisations;
+  Nweights = Nmeasures * polarisations;
+  
   if (rank == 0)
   {
     printf("N. measurements %d\n", Nmeasures);
-    printf("N. visibilities %d\n", Nvis);
+    printf("N. visibilities %ld\n", Nvis);
   }
 
   uu = (double *)calloc(Nmeasures, sizeof(double));
@@ -211,12 +235,6 @@ int main(int argc, char **argv)
   double *image_real = (double *)calloc(xaxis * yaxis, sizeof(double));
   double *image_imag = (double *)calloc(xaxis * yaxis, sizeof(double));
 
-#ifdef USE_MPI
-  MPI_Win slabwin;
-  MPI_Win_create(grid, size_of_grid * sizeof(double), sizeof(double), MPI_INFO_NULL, MPI_COMM_WORLD, &slabwin);
-  MPI_Win_fence(0, slabwin);
-#endif
-
   gridding(
       rank,
       size,
@@ -227,7 +245,7 @@ int main(int argc, char **argv)
       grid,
       gridss,
       MPI_COMM_WORLD,
-      1,
+      num_threads,
       grid_size_x,
       grid_size_y,
       w_support,
@@ -244,7 +262,7 @@ int main(int argc, char **argv)
       grid_size_x,
       grid_size_y,
       num_w_planes,
-      1,
+      num_threads,
       MPI_COMM_WORLD,
       size,
       rank,
@@ -262,12 +280,17 @@ int main(int argc, char **argv)
       wmax,
       uvmin,
       uvmax,
-      1,
+      num_threads,
       size,
       rank,
       MPI_COMM_WORLD);
 
-  MPI_Finalize();
+  if (rank==0)
+    printf("End of main\n");
 
-  printf("End of main\n");
+
+#ifdef USE_MPI
+  MPI_Finalize();
+#endif
+
 }

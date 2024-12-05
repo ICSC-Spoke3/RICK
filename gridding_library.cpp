@@ -4,12 +4,14 @@
 #include <string.h>
 #include <math.h>
 #include <unistd.h>
+#include <iostream>
 #include <stdatomic.h>
 #include "ricklib.h"
 #include <omp.h>
 
-
 #define PI 3.14159265359
+#define NTHREADS 32
+#define NWORKERS -1
 
 #define MIN(X, Y) (((X) < (Y)) ? (X) : (Y))
 #define MAX(X, Y) (((X) > (Y)) ? (X) : (Y))
@@ -91,6 +93,109 @@ void makeKaiserBesselKernel(double *kernel,
     kernel[i] = kernel[n - 1 - i];
 }
 
+#ifdef RICK_GPU
+
+__global__ void convolve_g(
+    int num_w_planes,
+    int num_points,
+    int freq_per_chan,
+    int polarizations,
+    double *uu,
+    double *vv,
+    double *ww,
+    float *vis_real,
+    float *vis_img,
+    float *weight,
+    double dx,
+    double dw,
+    int KernelLen,
+    int grid_size_x,
+    int grid_size_y,
+    double *grid,
+#if defined(GAUSS_HI_PRECISION)
+    double std22
+#else
+    double std22,
+    double *convkernel
+#endif
+)
+
+{
+  int gid = blockIdx.x * blockDim.x + threadIdx.x;
+  if (gid < num_points)
+  {
+    int i = gid;
+    long visindex = i * freq_per_chan * polarizations;
+    double norm = std22 / PI;
+
+    int j, k;
+
+    /* Convert UV coordinates to grid coordinates. */
+    double pos_u = uu[i] / dx;
+    double pos_v = vv[i] / dx;
+    double ww_i = ww[i] / dw;
+
+    int grid_w = (int)ww_i;
+    int grid_u = (int)pos_u;
+    int grid_v = (int)pos_v;
+
+    // check the boundaries
+    int jmin = (grid_u > KernelLen - 1) ? grid_u - KernelLen : 0;
+    int jmax = (grid_u < grid_size_x - KernelLen) ? grid_u + KernelLen : grid_size_x - 1;
+    int kmin = (grid_v > KernelLen - 1) ? grid_v - KernelLen : 0;
+    int kmax = (grid_v < grid_size_y - KernelLen) ? grid_v + KernelLen : grid_size_y - 1;
+
+    // Convolve this point onto the grid.
+    for (k = kmin; k <= kmax; k++)
+    {
+
+      double v_dist = (double)k + 0.5 - pos_v;
+      int increaseprecision = 5;
+
+      for (j = jmin; j <= jmax; j++)
+      {
+        double u_dist = (double)j + 0.5 - pos_u;
+        int iKer = 2 * (j + k * grid_size_x + grid_w * grid_size_x * grid_size_y);
+        int jKer = (int)(increaseprecision * (fabs(u_dist + (double)KernelLen)));
+        int kKer = (int)(increaseprecision * (fabs(v_dist + (double)KernelLen)));
+
+#ifdef GAUSS_HI_PRECISION
+        double conv_weight = gauss_kernel_norm(norm, std22, u_dist, v_dist);
+#endif
+#ifdef GAUSS
+        double conv_weight = convkernel[jKer] * convkernel[kKer];
+#endif
+#ifdef KAISERBESSEL
+        double conv_weight = convkernel[jKer] * convkernel[kKer];
+#endif
+
+        // Loops over frequencies and polarizations
+        double add_term_real = 0.0;
+        double add_term_img = 0.0;
+        long ifine = visindex;
+        for (int ifreq = 0; ifreq < freq_per_chan; ifreq++)
+        {
+          int iweight = visindex / freq_per_chan;
+          for (int ipol = 0; ipol < polarizations; ipol++)
+          {
+            double vistest = (double)vis_real[ifine];
+            if (!isnan(vistest))
+            {
+              add_term_real += weight[iweight] * vis_real[ifine] * conv_weight;
+              add_term_img += weight[iweight] * vis_img[ifine] * conv_weight;
+            }
+            ifine++;
+            iweight++;
+          }
+        }
+        atomicAdd(&(grid[iKer]), add_term_real);
+        atomicAdd(&(grid[iKer + 1]), add_term_img);
+      }
+    }
+  }
+}
+#endif
+
 void initialize_array(
     int nsectors,
     int nmeasures,
@@ -125,7 +230,7 @@ void initialize_array(
     exit(EXIT_FAILURE);
   }
 
-  int *counter = calloc((nsectors + 1), sizeof(int));
+  int *counter = (int*)calloc((nsectors + 1), sizeof(int));
   if (counter == NULL)
   {
     fprintf(stderr, "Error allocating memory for counter\n");
@@ -188,7 +293,7 @@ void wstack(
 {
   int i;
   // int index;
-  unsigned long long visindex;
+  long visindex;
 
   // Initialize the convolution kernel
   // For simplicity, we use for the moment only the Gaussian kernel:
@@ -209,13 +314,176 @@ void wstack(
   makeKaiserBesselKernel(convkernel, w_support, increaseprecision, alpha, overSamplingFactor, withSinc);
 #endif
 
+#ifdef RICK_GPU
+  int Nth = NTHREADS;
+  int Nbl = (int)(num_points / Nth) + 1;
+  if (NWORKERS == 1)
+  {
+    Nbl = 1;
+    Nth = 1;
+  };
+  long Nvis = num_points * freq_per_chan * polarizations;
+
+  int ndevices;
+  cudaGetDeviceCount(&ndevices);
+  cudaSetDevice(rank % ndevices);
+
+  // Create GPU arrays and offload them
+  double *uu_g;
+  double *vv_g;
+  double *ww_g;
+  float *vis_real_g;
+  float *vis_img_g;
+  float *weight_g;
+  double *convkernel_g;
+#if !defined(NCCL_REDUCE)
+  double *grid_g;
+#endif
+#if !defined(NCCL_REDUCE)
+  cudaStream_t stream_stacking;
+  cudaStreamCreate(&stream_stacking);
+#endif
+
+  // Create the event inside stream stacking
+  // cudaEvent_t event_kernel;
+
+  // for (int i=0; i<100000; i++)grid[i]=23.0;
+  cudaError_t mmm;
+  // mmm=cudaEventCreate(&event_kernel);
+  mmm = cudaMalloc(&uu_g, num_points * sizeof(double));
+  mmm = cudaMalloc(&vv_g, num_points * sizeof(double));
+  mmm = cudaMalloc(&ww_g, num_points * sizeof(double));
+  mmm = cudaMalloc(&vis_real_g, Nvis * sizeof(float));
+  mmm = cudaMalloc(&vis_img_g, Nvis * sizeof(float));
+  mmm = cudaMalloc(&weight_g, (Nvis / freq_per_chan) * sizeof(float));
+  // mmm=cudaMalloc(&grid_g,2*num_w_planes*grid_size_x*grid_size_y*sizeof(double));
+
+#if !defined(NCCL_REDUCE)
+  mmm = cudaMalloc(&grid_g, 2 * num_w_planes * grid_size_x * grid_size_y * sizeof(double));
+#endif
+
+#if !defined(GAUSS_HI_PRECISION)
+  mmm = cudaMalloc(&convkernel_g, increaseprecision * w_support * sizeof(double));
+#endif
+  if (mmm != cudaSuccess)
+  {
+    printf("!!! w-stacking.cu cudaMalloc ERROR %d !!!\n", mmm);
+  }
+
+#if !defined(NCCL_REDUCE)
+  mmm = cudaMemset(grid_g, 0.0, 2 * num_w_planes * grid_size_x * grid_size_y * sizeof(double));
+  if (mmm != cudaSuccess)
+  {
+    printf("!!! w-stacking.cu cudaMemset ERROR %d !!!\n", mmm);
+  }
+#endif
+
+  mmm = cudaMemcpyAsync(uu_g, uu, num_points * sizeof(double), cudaMemcpyHostToDevice, stream_stacking);
+  mmm = cudaMemcpyAsync(vv_g, vv, num_points * sizeof(double), cudaMemcpyHostToDevice, stream_stacking);
+  mmm = cudaMemcpyAsync(ww_g, ww, num_points * sizeof(double), cudaMemcpyHostToDevice, stream_stacking);
+  mmm = cudaMemcpyAsync(vis_real_g, vis_real, Nvis * sizeof(float), cudaMemcpyHostToDevice, stream_stacking);
+  mmm = cudaMemcpyAsync(vis_img_g, vis_img, Nvis * sizeof(float), cudaMemcpyHostToDevice, stream_stacking);
+  mmm = cudaMemcpyAsync(weight_g, weight, (Nvis / freq_per_chan) * sizeof(float), cudaMemcpyHostToDevice, stream_stacking);
+
+#if !defined(GAUSS_HI_PRECISION)
+  mmm = cudaMemcpyAsync(convkernel_g, convkernel, increaseprecision * w_support * sizeof(double), cudaMemcpyHostToDevice, stream_stacking);
+#endif
+
+  if (mmm != cudaSuccess)
+  {
+    printf("!!! w-stacking.cu cudaMemcpyAsync ERROR %d !!!\n", mmm);
+  }
+
+  // Call main GPU Kernel
+#if defined(GAUSS_HI_PRECISION)
+  convolve_g<<<Nbl, Nth, 0, stream_stacking>>>(
+      num_w_planes,
+      num_points,
+      freq_per_chan,
+      polarizations,
+      uu_g,
+      vv_g,
+      ww_g,
+      vis_real_g,
+      vis_img_g,
+      weight_g,
+      dx,
+      dw,
+      KernelLen,
+      grid_size_x,
+      grid_size_y,
+#if !defined(NCCL_REDUCE)
+      grid_g,
+#else
+      grid,
+#endif
+      std22);
+#else
+  convolve_g<<<Nbl, Nth, 0, stream_stacking>>>(
+      num_w_planes,
+      num_points,
+      freq_per_chan,
+      polarizations,
+      uu_g,
+      vv_g,
+      ww_g,
+      vis_real_g,
+      vis_img_g,
+      weight_g,
+      dx,
+      dw,
+      KernelLen,
+      grid_size_x,
+      grid_size_y,
+#if !defined(NCCL_REDUCE)
+      grid_g,
+#else
+      grid,
+#endif
+      std22,
+      convkernel_g);
+#endif
+
+  mmm = cudaStreamSynchronize(stream_stacking);
+  // Record the event
+  // mmm=cudaEventRecord(event_kernel,stream_stacking);
+
+  // Wait until the kernel ends
+  // mmm=cudaStreamWaitEvent(stream_stacking,event_kernel);
+
+  // for (int i=0; i<100000; i++)printf("%f\n",grid[i]);
+
+#if !defined(NCCL_REDUCE)
+  mmm = cudaMemcpy(grid, grid_g, 2 * num_w_planes * grid_size_x * grid_size_y * sizeof(double), cudaMemcpyDeviceToHost);
+#endif
+
+  if (mmm != cudaSuccess)
+    printf("CUDA ERROR %s\n", cudaGetErrorString(mmm));
+
+  mmm = cudaFree(uu_g);
+  mmm = cudaFree(vv_g);
+  mmm = cudaFree(ww_g);
+  mmm = cudaFree(vis_real_g);
+  mmm = cudaFree(vis_img_g);
+  mmm = cudaFree(weight_g);
+
+#if !defined(NCCL_REDUCE)
+  mmm = cudaFree(grid_g);
+#endif
+
+#if !defined(GAUSS_HI_PRECISION)
+  mmm = cudaFree(convkernel_g);
+#endif
+
+#else // switch between CPU and GPU gridding
+
 #ifdef _OPENMP
   omp_set_num_threads(num_threads);
 #endif
 
 #if defined(ACCOMP) && (GPU_STACKING)
   omp_set_default_device(rank % omp_get_num_devices());
-  myull Nvis = num_points * freq_per_chan * polarizations;
+  long Nvis = num_points * freq_per_chan * polarizations;
 #pragma omp target teams distribute parallel for private(visindex) map(to : uu[0 : num_points], vv[0 : num_points], ww[0 : num_points], vis_real[0 : Nvis], vis_img[0 : Nvis], weight[0 : Nvis / freq_per_chan]) map(tofrom : grid[0 : 2 * num_w_planes * grid_size_x * grid_size_y])
 #else
 #pragma omp parallel for private(visindex)
@@ -224,9 +492,9 @@ void wstack(
   for (i = 0; i < num_points; i++)
   {
 #ifdef _OPENMP
-    //int tid;
-    //tid = omp_get_thread_num();
-    //printf("%d\n",tid);
+    // int tid;
+    // tid = omp_get_thread_num();
+    // printf("%d\n",tid);
 #endif
 
     visindex = i * freq_per_chan * polarizations;
@@ -273,7 +541,7 @@ void wstack(
         // Loops over frequencies and polarizations
         double add_term_real = 0.0;
         double add_term_img = 0.0;
-        unsigned long long ifine = visindex;
+        long ifine = visindex;
         // DAV: the following two loops are performend by each thread separately: no problems of race conditions
         for (int ifreq = 0; ifreq < freq_per_chan; ifreq++)
         {
@@ -300,12 +568,14 @@ void wstack(
 #if defined(ACCOMP) && (GPU_STACKING)
 #pragma omp target exit data map(delete : uu[0 : num_points], vv[0 : num_points], ww[0 : num_points], vis_real[0 : Nvis], vis_img[0 : Nvis], weight[0 : Nvis / freq_per_chan], grid[0 : 2 * num_w_planes * grid_size_x * grid_size_y])
 #endif
+
+#endif
 }
 
 void free_array(int *histo_send, int **sectorarrays, int nsectors)
 
 {
-  
+
   for (int i = nsectors - 1; i > 0; i--)
     free(sectorarrays[i]);
 
@@ -361,7 +631,7 @@ void gridding_data(
 
     int Nsec = histo_send[isector];
     int Nweightss = Nsec * polarisations;
-    unsigned long long Nvissec = Nweightss * freq_per_chan;
+    long Nvissec = Nweightss * freq_per_chan;
     double_t *memory = (double *)malloc((Nsec * 3) * sizeof(double_t) +
                                         (Nvissec * 2 + Nweightss) * sizeof(float_t));
 
@@ -472,30 +742,30 @@ void gridding_data(
 
       // Force to use MPI_Reduce when -fopenmp is not active
 #ifdef _OPENMP
-      //if (reduce_method == REDUCE_MPI)
+      // if (reduce_method == REDUCE_MPI)
 
-        MPI_Reduce(gridss, grid, size_of_grid, MPI_DOUBLE, MPI_SUM, target_rank, MYMYMPI_COMM);
-	/*
-      else if (reduce_method == REDUCE_RING)
-      {
+      MPI_Reduce(gridss, grid, size_of_grid, MPI_DOUBLE, MPI_SUM, target_rank, MYMYMPI_COMM);
+      /*
+          else if (reduce_method == REDUCE_RING)
+          {
 
-        int ret = reduce_ring(target_rank);
-        // grid    = (double*)Me.fwin.ptr; //Let grid point to the right memory location [GL]
+            int ret = reduce_ring(target_rank);
+            // grid    = (double*)Me.fwin.ptr; //Let grid point to the right memory location [GL]
 
-        if (ret != 0)
-        {
-          char message[1000];
-          sprintf(message, "Some problem occurred in the ring reduce "
-                           "while processing sector %d",
-                  isector);
-          free(memory);
-          shutdown_wstacking(ERR_REDUCE, message, __FILE__, __LINE__);
-        }
-      }
-	*/
+            if (ret != 0)
+            {
+              char message[1000];
+              sprintf(message, "Some problem occurred in the ring reduce "
+                               "while processing sector %d",
+                      isector);
+              free(memory);
+              shutdown_wstacking(ERR_REDUCE, message, __FILE__, __LINE__);
+            }
+          }
+      */
 #else
       MPI_Reduce(gridss, grid, size_of_grid, MPI_DOUBLE, MPI_SUM, target_rank, MYMYMPI_COMM);
-	
+
 #endif
 
       // Go to next sector
@@ -559,7 +829,6 @@ void gridding(
       vv,
       yaxis,
       dx);
-
 
   // Sector and Gridding data
   gridding_data(

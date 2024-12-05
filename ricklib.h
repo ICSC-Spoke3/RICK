@@ -1,14 +1,15 @@
 #include <mpi.h>
-#include <fftw3-mpi.h>
 
 #ifdef _OPENMP
 #define HYBRID_FFTW
 #endif
 
-#if defined( HYBRID_FFTW )
+#if !defined(RICK_GPU) && defined( HYBRID_FFTW )
+#include <fftw3-mpi.h>
 #define FFT_INIT    { fftw_init_threads(); fftw_mpi_init();}
 #define FFT_CLEANUP fftw_cleanup_threads()
-#else
+#elif !defined(RICK_GPU) && !defined(HYBRID_FFTW)
+#include <fftw3-mpi.h>
 #define FFT_INIT    fftw_mpi_init()
 #define FFT_CLEANUP fftw_cleanup()
 #endif
