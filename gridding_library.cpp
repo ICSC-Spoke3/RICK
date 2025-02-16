@@ -4,14 +4,12 @@
 #include <string.h>
 #include <math.h>
 #include <unistd.h>
-#include <iostream>
 #include <stdatomic.h>
 #include "ricklib.h"
 #include <omp.h>
 
 #define PI 3.14159265359
 #define NTHREADS 32
-#define NWORKERS -1
 
 #define MIN(X, Y) (((X) < (Y)) ? (X) : (Y))
 #define MAX(X, Y) (((X) > (Y)) ? (X) : (Y))
@@ -20,6 +18,13 @@
 
 int *histo_send;
 int **sectorarray;
+float weights_stokes_sum;
+
+#if defined(STOKESI) || defined(STOKESQ) || defined(STOKESU)
+float *visreal_stokes;
+float *visimg_stokes;
+float *weights_stokes;
+#endif
 
 // Convolution kernels
 
@@ -93,11 +98,114 @@ void makeKaiserBesselKernel(double *kernel,
     kernel[i] = kernel[n - 1 - i];
 }
 
+/*
+
+Weighting functions
+
+*/
+
+void weighting_uniform(
+    unsigned int iKer,
+    unsigned int visindex,
+    float *weight,
+    float *weight_uv)
+{
+  weight_uv[iKer] += weight[visindex]; // dentro una stessa cella uv
+}
+
+void weighting_briggs(
+    unsigned int iKer,
+    unsigned int visindex,
+    float *weight,
+    float *weight_uv,
+    float *weight_uv_2)
+{
+  weight_uv[iKer] += weight[visindex]; // dentro una stessa cella uv
+  weight_uv_2[iKer] += (weight[visindex] * weight[visindex]);
+}
+
+/*
+
+Stokes collapsing
+
+*/
+
+void stokes(
+    unsigned int Nmeasures,
+    int freq_per_chan,
+    float *visreal,
+    float *visimg,
+    float *weights)
+{
+  // In this way we select and combine correlations to form Stokes parameters
+
+#if !defined(WEIGHTING_UNIFORM) || !defined(WEIGHTING_BRIGGS)
+  weights_stokes_sum = 0.0;
+#endif
+
+#if defined(STOKESI)
+  visreal_stokes = (float *)malloc(Nmeasures * freq_per_chan * sizeof(float));
+  visimg_stokes = (float *)malloc(Nmeasures * freq_per_chan * sizeof(float));
+  weights_stokes = (float *)malloc(Nmeasures * freq_per_chan * sizeof(float));
+  for (unsigned int i = 0; i < (Nmeasures * freq_per_chan); i++)
+  {
+    visreal_stokes[i] = 0.5 * (visreal[i * 4] + visreal[(i * 4) + 3]);
+    visimg_stokes[i] = 0.5 * (visimg[i * 4] + visimg[(i * 4) + 3]);
+    weights_stokes[i] = weights[i * 4];
+#if !defined(WEIGHTING_UNIFORM) || !defined(WEIGHTING_BRIGGS)
+    weights_stokes_sum += weights_stokes[i];
+#endif
+  }
+  // printf("Sum weights Stokes I %f\n", weights_stokes_sum);
+#elif defined(STOKESQ)
+  visreal_stokes = (float *)malloc(Nmeasures * freq_per_chan * sizeof(float));
+  visimg_stokes = (float *)malloc(Nmeasures * freq_per_chan * sizeof(float));
+  weights_stokes = (float *)malloc(Nmeasures * freq_per_chan * sizeof(float));
+  for (unsigned int i = 0; i < (Nmeasures * freq_per_chan); i++)
+  {
+    visreal_stokes[i] = 0.5 * (visreal[i * 4] - visreal[(i * 4) + 3]);
+    visimg_stokes[i] = 0.5 * (visimg[i * 4] - visimg[(i * 4) + 3]);
+    weights_stokes[i] = weights[i * 4];
+#if !defined(WEIGHTING_UNIFORM) || !defined(WEIGHTING_BRIGGS)
+    weights_stokes_sum += weights_stokes[i];
+#endif
+  }
+#elif defined(STOKESU)
+  visreal_stokes = (float *)malloc(Nmeasures * freq_per_chan * sizeof(float));
+  visimg_stokes = (float *)malloc(Nmeasures * freq_per_chan * sizeof(float));
+  weights_stokes = (float *)malloc(Nmeasures * freq_per_chan * sizeof(float));
+  for (unsigned int i = 0; i < (Nmeasures * freq_per_chan); i++)
+  {
+    visreal_stokes[i] = 0.5 * (visreal[(i * 4) + 1] + visreal[(i * 4) + 2]);
+    visimg_stokes[i] = 0.5 * (visimg[(i * 4) + 1] + visimg[(i * 4) + 2]);
+    weights_stokes[i] = weights[i * 4];
+#if !defined(WEIGHTING_UNIFORM) || !defined(WEIGHTING_BRIGGS)
+    weights_stokes_sum += weights_stokes[i];
+#endif
+  }
+// #elif defined(STOKESV)
+// float * visreal_stokesI = (float *)malloc(Nmeasures * freq_per_chan * sizeof(float));
+// float * visimg_stokesI = (float *)malloc(Nmeasures * freq_per_chan * sizeof(float));
+// float * weights_stokesI = (float *)malloc(Nmeasures * freq_per_chan * sizeof(float));
+#endif
+
+  // printf("Sum of all Stokes I weights %f\n", weights_stokes_sum);
+  free(visreal);
+  free(visimg);
+  free(weights);
+}
+
+/*
+
+convolve_g
+
+*/
+
 #ifdef RICK_GPU
 
 __global__ void convolve_g(
     int num_w_planes,
-    int num_points,
+    unsigned int num_points,
     int freq_per_chan,
     int polarizations,
     double *uu,
@@ -121,11 +229,11 @@ __global__ void convolve_g(
 )
 
 {
-  int gid = blockIdx.x * blockDim.x + threadIdx.x;
+  unsigned int gid = blockIdx.x * blockDim.x + threadIdx.x;
   if (gid < num_points)
   {
-    int i = gid;
-    long visindex = i * freq_per_chan * polarizations;
+    unsigned int i = gid;
+    unsigned long long visindex = i * freq_per_chan * polarizations;
     double norm = std22 / PI;
 
     int j, k;
@@ -140,10 +248,10 @@ __global__ void convolve_g(
     int grid_v = (int)pos_v;
 
     // check the boundaries
-    int jmin = (grid_u > KernelLen - 1) ? grid_u - KernelLen : 0;
-    int jmax = (grid_u < grid_size_x - KernelLen) ? grid_u + KernelLen : grid_size_x - 1;
-    int kmin = (grid_v > KernelLen - 1) ? grid_v - KernelLen : 0;
-    int kmax = (grid_v < grid_size_y - KernelLen) ? grid_v + KernelLen : grid_size_y - 1;
+    unsigned int jmin = (grid_u > KernelLen - 1) ? grid_u - KernelLen : 0;
+    unsigned int jmax = (grid_u < grid_size_x - KernelLen) ? grid_u + KernelLen : grid_size_x - 1;
+    unsigned int kmin = (grid_v > KernelLen - 1) ? grid_v - KernelLen : 0;
+    unsigned int kmax = (grid_v < grid_size_y - KernelLen) ? grid_v + KernelLen : grid_size_y - 1;
 
     // Convolve this point onto the grid.
     for (k = kmin; k <= kmax; k++)
@@ -155,7 +263,7 @@ __global__ void convolve_g(
       for (j = jmin; j <= jmax; j++)
       {
         double u_dist = (double)j + 0.5 - pos_u;
-        int iKer = 2 * (j + k * grid_size_x + grid_w * grid_size_x * grid_size_y);
+        unsigned int iKer = 2 * (j + k * grid_size_x + grid_w * grid_size_x * grid_size_y);
         int jKer = (int)(increaseprecision * (fabs(u_dist + (double)KernelLen)));
         int kKer = (int)(increaseprecision * (fabs(v_dist + (double)KernelLen)));
 
@@ -172,10 +280,10 @@ __global__ void convolve_g(
         // Loops over frequencies and polarizations
         double add_term_real = 0.0;
         double add_term_img = 0.0;
-        long ifine = visindex;
+        unsigned long long ifine = visindex;
         for (int ifreq = 0; ifreq < freq_per_chan; ifreq++)
         {
-          int iweight = visindex / freq_per_chan;
+          unsigned int iweight = visindex / freq_per_chan;
           for (int ipol = 0; ipol < polarizations; ipol++)
           {
             double vistest = (double)vis_real[ifine];
@@ -196,6 +304,11 @@ __global__ void convolve_g(
 }
 #endif
 
+/*
+
+Initialize array
+
+*/
 void initialize_array(
     int nsectors,
     int nmeasures,
@@ -230,7 +343,7 @@ void initialize_array(
     exit(EXIT_FAILURE);
   }
 
-  int *counter = (int*)calloc((nsectors + 1), sizeof(int));
+  int *counter = calloc((nsectors + 1), sizeof(int));
   if (counter == NULL)
   {
     fprintf(stderr, "Error allocating memory for counter\n");
@@ -271,9 +384,15 @@ void initialize_array(
 #endif
 }
 
+/*
+
+wstack - Gridding function
+
+*/
+
 void wstack(
-    int num_w_planes,
-    int num_points,
+    unsigned int num_w_planes,
+    unsigned int num_points,
     int freq_per_chan,
     int polarizations,
     double *uu,
@@ -285,15 +404,16 @@ void wstack(
     double dx,
     double dw,
     int w_support,
-    int grid_size_x,
-    int grid_size_y,
+    unsigned int grid_size_x,
+    unsigned int grid_size_y,
     double *grid,
     int num_threads,
+    int size,
     int rank)
 {
-  int i;
+  unsigned int i;
   // int index;
-  long visindex;
+  unsigned int visindex;
 
   // Initialize the convolution kernel
   // For simplicity, we use for the moment only the Gaussian kernel:
@@ -316,13 +436,13 @@ void wstack(
 
 #ifdef RICK_GPU
   int Nth = NTHREADS;
-  int Nbl = (int)(num_points / Nth) + 1;
+  unsigned int Nbl = (unsigned int)(num_points / Nth) + 1;
   if (NWORKERS == 1)
   {
     Nbl = 1;
     Nth = 1;
   };
-  long Nvis = num_points * freq_per_chan * polarizations;
+  unsigned long long Nvis = num_points * freq_per_chan * polarizations;
 
   int ndevices;
   cudaGetDeviceCount(&ndevices);
@@ -475,7 +595,7 @@ void wstack(
   mmm = cudaFree(convkernel_g);
 #endif
 
-#else // switch between CPU and GPU gridding
+#else // switch between GPU and CPU gridding (if not RICK_GPU)
 
 #ifdef _OPENMP
   omp_set_num_threads(num_threads);
@@ -483,10 +603,72 @@ void wstack(
 
 #if defined(ACCOMP) && (GPU_STACKING)
   omp_set_default_device(rank % omp_get_num_devices());
-  long Nvis = num_points * freq_per_chan * polarizations;
+  unsigned int Nvis = num_points * freq_per_chan;
 #pragma omp target teams distribute parallel for private(visindex) map(to : uu[0 : num_points], vv[0 : num_points], ww[0 : num_points], vis_real[0 : Nvis], vis_img[0 : Nvis], weight[0 : Nvis / freq_per_chan]) map(tofrom : grid[0 : 2 * num_w_planes * grid_size_x * grid_size_y])
 #else
 #pragma omp parallel for private(visindex)
+#endif
+
+#if defined(WEIGHTING_BRIGGS)
+  float robust = 1.2;
+#endif
+
+#if defined(WEIGHTING_UNIFORM) || defined(WEIGHTING_BRIGGS)
+  float *robustness;
+  float *out_weight_uniform;
+  float *weight_uv;
+  float *weight_uv_2;
+
+  out_weight_uniform = (float *)malloc(num_points * freq_per_chan * sizeof(float));
+  weight_uv = (float *)malloc(grid_size_x * grid_size_y * num_w_planes * sizeof(float));
+  weight_uv_2 = (float *)malloc(grid_size_x * grid_size_y * num_w_planes * sizeof(float));
+  robustness = (float *)malloc(grid_size_x * grid_size_y * num_w_planes * size * sizeof(float));
+
+  for (i = 0; i < num_points; i++)
+  {
+    visindex = i * freq_per_chan;
+
+    double sum = 0.0;
+    int j, k;
+
+    // Convert UV coordinates to grid coordinates.
+    double pos_u = uu[i] / dx;
+    double pos_v = vv[i] / dx;
+    double ww_i = ww[i] / dw;
+
+    int grid_w = (int)ww_i;
+    int grid_u = (int)pos_u;
+    int grid_v = (int)pos_v;
+
+    // check the boundaries
+    unsigned int jmin = (grid_u > KernelLen - 1) ? grid_u - KernelLen : 0;
+    unsigned int jmax = (grid_u < grid_size_x - KernelLen) ? grid_u + KernelLen : grid_size_x - 1;
+    unsigned int kmin = (grid_v > KernelLen - 1) ? grid_v - KernelLen : 0;
+    unsigned int kmax = (grid_v < grid_size_y - KernelLen) ? grid_v + KernelLen : grid_size_y - 1;
+    // printf("%ld, %ld, %ld, %ld\n",jmin,jmax,kmin,kmax);
+
+    // Convolve this point onto the grid.
+    for (k = kmin; k <= kmax; k++)
+    {
+      for (j = jmin; j <= jmax; j++)
+      {
+        unsigned int iKer = 2 * (j + k * grid_size_x + grid_w * grid_size_x * grid_size_y);
+#if defined(WEIGHTING_UNIFORM)
+        weighting_uniform(iKer, visindex, weight, weight_uv);
+        // To be done!!!!!!!!!!
+        // float weights_stokes_sum = 0.0;
+        // for (unsigned int i = 0; i < (Nmeasures * freq_per_chan); i++)
+        //{
+        //  weights_stokes_sum += weight_uv[i];
+        //}
+#elif defined(WEIGHTING_BRIGGS)
+        weighting_briggs(iKer, visindex, weight, weight_uv, weight_uv_2);
+#endif
+      }
+    }
+  }
+  // printf("Sum of all Stokes weights %f\n", weights_stokesI_sum);
+
 #endif
 
   for (i = 0; i < num_points; i++)
@@ -497,10 +679,11 @@ void wstack(
     // printf("%d\n",tid);
 #endif
 
-    visindex = i * freq_per_chan * polarizations;
+    visindex = i * freq_per_chan;
 
     double sum = 0.0;
     int j, k;
+    // if (i%1000 == 0)printf("%ld\n",i);
 
     /* Convert UV coordinates to grid coordinates. */
     double pos_u = uu[i] / dx;
@@ -512,28 +695,56 @@ void wstack(
     int grid_v = (int)pos_v;
 
     // check the boundaries
-    int jmin = (grid_u > KernelLen - 1) ? grid_u - KernelLen : 0;
-    int jmax = (grid_u < grid_size_x - KernelLen) ? grid_u + KernelLen : grid_size_x - 1;
-    int kmin = (grid_v > KernelLen - 1) ? grid_v - KernelLen : 0;
-    int kmax = (grid_v < grid_size_y - KernelLen) ? grid_v + KernelLen : grid_size_y - 1;
+    unsigned int jmin = (grid_u > KernelLen - 1) ? grid_u - KernelLen : 0;
+    unsigned int jmax = (grid_u < grid_size_x - KernelLen) ? grid_u + KernelLen : grid_size_x - 1;
+    unsigned int kmin = (grid_v > KernelLen - 1) ? grid_v - KernelLen : 0;
+    unsigned int kmax = (grid_v < grid_size_y - KernelLen) ? grid_v + KernelLen : grid_size_y - 1;
+    // printf("%d, %ld, %ld, %d, %ld, %ld\n",grid_u,jmin,jmax,grid_v,kmin,kmax);
 
     // Convolve this point onto the grid.
     for (k = kmin; k <= kmax; k++)
     {
+
       double v_dist = (double)k + 0.5 - pos_v;
+      // double v_dist = (double)k - pos_v;
 
       for (j = jmin; j <= jmax; j++)
       {
         double u_dist = (double)j + 0.5 - pos_u;
-        int iKer = 2 * (j + k * grid_size_x + grid_w * grid_size_x * grid_size_y);
+        // double u_dist = (double)j - pos_u;
+        unsigned int iKer = 2 * (j + k * grid_size_x + grid_w * grid_size_x * grid_size_y);
         int jKer = (int)(increaseprecision * (fabs(u_dist + (double)KernelLen)));
         int kKer = (int)(increaseprecision * (fabs(v_dist + (double)KernelLen)));
+
+#if defined(WEIGHTING_UNIFORM)
+        if (weight_uv[iKer] != 0.0)
+        {
+          out_weight_uniform[visindex] = 1.0 / weight_uv[iKer];
+        }
+        else
+        {
+          out_weight_uniform[visindex] = 0.0;
+        }
+#elif defined(WEIGHTING_BRIGGS)
+        if (weight_uv[iKer] != 0.0)
+        {
+          robustness[iKer] = (pow((5.0 * (1.0 / (pow(10.0, robust)))), 2)) / (weight_uv_2[iKer] / weight_uv[iKer]);
+          out_weight_uniform[visindex] = weight[visindex] / (1 + robustness[iKer] * weight_uv[iKer]);
+        }
+        else
+        {
+          out_weight_uniform[visindex] = 0.0;
+        }
+#endif
 
 #ifdef GAUSS_HI_PRECISION
         double conv_weight = gauss_kernel_norm(norm, std22, u_dist, v_dist);
 #endif
 #ifdef GAUSS
         double conv_weight = convkernel[jKer] * convkernel[kKer];
+        // if(jKer < 0 || jKer >= 35 || kKer < 0 || kKer >= 35)
+        //	printf("%f %d %f %d\n",fabs(u_dist+(double)KernelLen),jKer,fabs(v_dist+(double)KernelLen),kKer);
+        // printf("%d %d %d %d %f %f %f %f %f\n",jKer, j, kKer, k, pos_u, pos_v, u_dist,v_dist,conv_weight);
 #endif
 #ifdef KAISERBESSEL
         double conv_weight = convkernel[jKer] * convkernel[kKer];
@@ -541,21 +752,24 @@ void wstack(
         // Loops over frequencies and polarizations
         double add_term_real = 0.0;
         double add_term_img = 0.0;
-        long ifine = visindex;
+        unsigned int ifine = visindex;
         // DAV: the following two loops are performend by each thread separately: no problems of race conditions
-        for (int ifreq = 0; ifreq < freq_per_chan; ifreq++)
+        for (unsigned int ifreq = 0; ifreq < freq_per_chan; ifreq++)
         {
-          int iweight = visindex / freq_per_chan;
-          for (int ipol = 0; ipol < polarizations; ipol++)
+          unsigned int iweight = visindex;
+          if (!isnan(vis_real[ifine]))
           {
-            if (!isnan(vis_real[ifine]))
-            {
-              add_term_real += weight[iweight] * vis_real[ifine] * conv_weight;
-              add_term_img += weight[iweight] * vis_img[ifine] * conv_weight;
-            }
-            ifine++;
-            iweight++;
+#if defined(WEIGHTING_UNIFORM) || defined(WEIGHTING_BRIGGS)
+            add_term_real += out_weight_uniform[iweight] * vis_real[ifine] * conv_weight;
+            add_term_img += out_weight_uniform[iweight] * vis_img[ifine] * conv_weight;
+#else
+            add_term_real += weight[iweight] * vis_real[ifine] * conv_weight;
+            add_term_img += weight[iweight] * vis_img[ifine] * conv_weight;
+#endif
           }
+          ifine++;
+          iweight++;
+          // printf("iweight = %u\n", iweight);
         }
         // DAV: this is the critical call in terms of correctness of the results and of performance
 #pragma omp atomic
@@ -565,15 +779,40 @@ void wstack(
       }
     }
   }
+/*
+#if defined(WEIGHTING_UNIFORM) || defined(WEIGHTING_BRIGGS)
+  for (unsigned int ii = 0; ii < (num_points * freq_per_chan); ii++)
+  {
+    weights_stokes_sum += out_weight_uniform[i];
+  }
+  printf("Weights sum = %f\n", weights_stokes_sum);
+#endif
+*/
 #if defined(ACCOMP) && (GPU_STACKING)
 #pragma omp target exit data map(delete : uu[0 : num_points], vv[0 : num_points], ww[0 : num_points], vis_real[0 : Nvis], vis_img[0 : Nvis], weight[0 : Nvis / freq_per_chan], grid[0 : 2 * num_w_planes * grid_size_x * grid_size_y])
 #endif
 
+#if defined(WEIGHTING_UNIFORM)
+  free(weight_uv);
+  free(out_weight_uniform);
+#elif defined(WEIGHTING_BRIGGS)
+  free(weight_uv);
+  free(weight_uv_2);
+  free(out_weight_uniform);
+  free(robustness);
+#endif
+
+// End switch between CUDA and CPU versions
 #endif
 }
 
-void free_array(int *histo_send, int **sectorarrays, int nsectors)
+/*
 
+Free array
+
+*/
+
+void free_array(int *histo_send, int **sectorarrays, int nsectors)
 {
 
   for (int i = nsectors - 1; i > 0; i--)
@@ -585,6 +824,12 @@ void free_array(int *histo_send, int **sectorarrays, int nsectors)
 
   return;
 }
+
+/*
+
+Gridding data
+
+*/
 
 void gridding_data(
     double_t dx,
@@ -629,9 +874,10 @@ void gridding_data(
   {
     // double start = CPU_TIME_wt;
 
-    int Nsec = histo_send[isector];
-    int Nweightss = Nsec * polarisations;
-    long Nvissec = Nweightss * freq_per_chan;
+    unsigned int Nsec = histo_send[isector];
+    // printf("isector = %d\n", isector);
+    unsigned int Nweightss = Nsec * freq_per_chan;
+    unsigned int Nvissec = Nweightss;
     double_t *memory = (double *)malloc((Nsec * 3) * sizeof(double_t) +
                                         (Nvissec * 2 + Nweightss) * sizeof(float_t));
 
@@ -644,7 +890,7 @@ void gridding_data(
 
     // select data for this sector
     int icount = 0;
-    int ip = 0;
+    // int ip = 0;
     int inu = 0;
 
 #warning "this loop should be threaded"
@@ -657,15 +903,17 @@ void gridding_data(
       uus[icount] = uu[ilocal];
       vvs[icount] = vv[ilocal] - isector * shift;
       wws[icount] = ww[ilocal];
-      for (int ipol = 0; ipol < polarisations; ipol++)
+      /*for (int ipol = 0; ipol < freq_per_chan; ipol++)
       {
-        weightss[ip] = weights[ilocal * polarisations + ipol];
+        weightss[ip] = weights[ilocal * freq_per_chan + ipol];
         ip++;
       }
-      for (int ifreq = 0; ifreq < polarisations * freq_per_chan; ifreq++)
+      */
+      for (int ifreq = 0; ifreq < freq_per_chan; ifreq++)
       {
-        visreals[inu] = visreal[ilocal * polarisations * freq_per_chan + ifreq];
-        visimgs[inu] = visimg[ilocal * polarisations * freq_per_chan + ifreq];
+        visreals[inu] = visreal[ilocal * freq_per_chan + ifreq];
+        visimgs[inu] = visimg[ilocal * freq_per_chan + ifreq];
+        weightss[inu] = weights[ilocal * freq_per_chan + ifreq];
         inu++;
       }
       icount++;
@@ -728,6 +976,7 @@ void gridding_data(
            yaxis,
            stacking_target_array,
            num_threads,
+           size,
            rank);
 
 #ifdef VERBOSE
@@ -783,10 +1032,16 @@ void gridding_data(
   return;
 }
 
+/*
+
+Main gridding function
+
+*/
+
 void gridding(
     int rank,
     int size,
-    int nmeasures,
+    unsigned int nmeasures,
     double *uu,
     double *vv,
     double *ww,
@@ -808,13 +1063,14 @@ void gridding(
 {
 
   if (rank == 0)
+  {
     printf("RICK GRIDDING DATA\n");
-
+  }
   // double start = CPU_TIME_wt;
 
   int xaxis = grid_size_x;
   int yaxis = grid_size_y / size;
-  int size_of_grid = 2 * num_w_planes * xaxis * yaxis;
+  unsigned int size_of_grid = 2 * num_w_planes * xaxis * yaxis;
 
   double dx = 1.0 / (double)grid_size_x;
   double dw = 1.0 / (double)num_w_planes;
@@ -829,6 +1085,14 @@ void gridding(
       vv,
       yaxis,
       dx);
+
+  // Collapse correlations into Stokes parameters
+  stokes(
+      nmeasures,
+      freq_per_chan,
+      visreal,
+      visimg,
+      weights);
 
   // Sector and Gridding data
   gridding_data(
@@ -851,9 +1115,9 @@ void gridding(
       ww,
       grid,
       gridss,
-      visreal,
-      visimg,
-      weights,
+      visreal_stokes,
+      visimg_stokes,
+      weights_stokes,
       MYMPI_COMM);
 
   free_array(histo_send, sectorarray, size);
