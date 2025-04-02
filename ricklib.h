@@ -31,6 +31,10 @@ void gridding(
     int,
     int,
     int,
+#if defined(WRITE_DATA)
+    char *,
+    char *,
+#endif
     float *,
     float *,
     float *,
@@ -45,6 +49,10 @@ void gridding(
     MPI_Comm,
     int,
     int,
+#if defined(WRITE_DATA)
+    char *,
+    char *,
+#endif
     double *,
     double *);
 
