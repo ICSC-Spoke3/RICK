@@ -16,6 +16,7 @@ RICKlib requires the following softwares:
 - MPI
 - fftw3
 
+### In Python:
 To compile the individual libraries use the following commands:
 ```
 > mpicc -L/path/to/mpi/lib/ -I/path/to/mpi/include/ -shared -o gridding.so -fPIC gridding_library.c
@@ -27,6 +28,17 @@ These commands should create dynamic libraries with extension `.so` in your work
 After this, you can run the Python script `lib_test.py` specifying the directory of the measurement set and the parameters for the image (size, w-planes, etc.)
 ```
 > python3 lib_test.py
+```
+
+### IN C:
+
+```
+> mpicc -DGAUSS -DUSE_MPI -DPHASE_ON -DSTOKESI -DWRITE_DATA -lfftw3_mpi -lfftw3 -lm test_clib.c gridding_library.c fft_library.c phase_correction_library.c -o test.exe
+```
+
+To run the library
+```
+> mpirun -np N test.exe
 ```
 
 <br>
