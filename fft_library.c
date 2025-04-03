@@ -258,8 +258,8 @@ void fftw_data(
           {
             unsigned int global_index = (iu + (iv + isector * yaxis) * xaxis + iw * grid_size_x * grid_size_y) * sizeof(double);
             unsigned int index = iu + iv * xaxis + iw * xaxis * yaxis;
-            MPI_File_write_at_all(pFilereal, global_index, &gridss_real[index], 1, MPI_DOUBLE, MPI_STATUS_IGNORE);
-            MPI_File_write_at_all(pFileimg, global_index, &gridss_img[index], 1, MPI_DOUBLE, MPI_STATUS_IGNORE);
+            MPI_File_write_at_all(pFilereal, global_index, &gridss_real[index], size_of_grid / 2, MPI_DOUBLE, MPI_STATUS_IGNORE);
+            MPI_File_write_at_all(pFileimg, global_index, &gridss_img[index], size_of_grid / 2, MPI_DOUBLE, MPI_STATUS_IGNORE);
           }
     }
     else
