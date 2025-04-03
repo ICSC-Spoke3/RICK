@@ -422,8 +422,8 @@ void phase_correction(
 
   long global_index = rank * (xaxis * yaxis) * sizeof(long);
 
-  MPI_File_write_at_all(pFilereal, global_index, image_real, 1, MPI_DOUBLE, MPI_STATUS_IGNORE);
-  MPI_File_write_at_all(pFileimg, global_index, image_imag, 1, MPI_DOUBLE, MPI_STATUS_IGNORE);
+  MPI_File_write_at_all(pFilereal, global_index, image_real, xaxis * yaxis, MPI_DOUBLE, MPI_STATUS_IGNORE);
+  MPI_File_write_at_all(pFileimg, global_index, image_imag, xaxis * yaxis, MPI_DOUBLE, MPI_STATUS_IGNORE);
 
   MPI_File_close(&pFilereal);
   MPI_File_close(&pFileimg);
