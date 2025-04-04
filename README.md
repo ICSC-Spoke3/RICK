@@ -30,15 +30,17 @@ After this, you can run the Python script `lib_test.py` specifying the directory
 > python3 lib_test.py
 ```
 
+Please install HeFFTe on your machine
+
 ### IN C:
 
 ```
-> mpicc -DGAUSS -DUSE_MPI -DPHASE_ON -DSTOKESI -DWRITE_DATA -lfftw3_mpi -lfftw3 -lm test_clib.c gridding_library.c fft_library.c phase_correction_library.c -o test.exe
+> make
 ```
 
 To run the library
 ```
-> mpirun -np N test.exe
+> mpirun -np N rick
 ```
 
 <br>
