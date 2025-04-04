@@ -19,6 +19,29 @@
 #define MIN(X, Y) (((X) < (Y)) ? (X) : (Y))
 #define MAX(X, Y) (((X) > (Y)) ? (X) : (Y))
 
+
+/* FUNCTION FOR TIMINGS */
+void write_timings(int rank, timing_t timing)
+{
+  double time_IO, time_gridding, time_fft, time_phase, time_total;
+  
+  MPI_Reduce(&timing.IO, &time_IO, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+  MPI_Reduce(&timing.gridding, &time_gridding, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+  MPI_Reduce(&timing.fft, &time_fft, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+  MPI_Reduce(&timing.phase, &time_phase, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+  MPI_Reduce(&timing.total, &time_total, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+
+  if (rank == 0)
+    {
+      printf("%40s time: %g sec\n", "I/O (reading)", time_IO);
+      printf("%40s time: %g sec\n", "Gridding", time_gridding);
+      printf("%40s time: %g sec\n", "FFT", time_fft);
+      printf("%40s time: %g sec\n", "Phase correction", time_phase);
+      printf("%40s time: %g sec\n", "Total", time_total);
+    }
+}
+
+
 int main(int argc, char **argv)
 {
   int rank;
@@ -198,15 +221,18 @@ int main(int argc, char **argv)
   visreal = (float *)calloc(Nvis, sizeof(float));
   visimg = (float *)calloc(Nvis, sizeof(float));
 
+  /* DEFINE THE TIMINGS STRUCTURE */
+  timing_t timing;
+ 
   if (rank == 0)
     printf("READING DATA WITH MPI-I/O\n");
 
-  int ierr;
+  double total_start = WALLCLOCK_TIME;
 
-  
   strcpy(filename, datapath);
   strcat(filename, ufile);
-    
+
+  int ierr;
   ierr = MPI_File_open(MPI_COMM_WORLD, filename, MPI_MODE_RDONLY, MPI_INFO_NULL, &pFile1);
 
   if (ierr != MPI_SUCCESS)
@@ -300,6 +326,8 @@ int main(int argc, char **argv)
   MPI_File_close(&pFile1);
 
   MPI_Barrier(MPI_COMM_WORLD);
+
+  timing.IO += WALLCLOCK_TIME - total_start;
   
   long size_of_grid = 2 * num_w_planes * xaxis * yaxis;
 
@@ -311,6 +339,8 @@ int main(int argc, char **argv)
   double *image_real = (double *)calloc(xaxis * yaxis, sizeof(double));
   double *image_imag = (double *)calloc(xaxis * yaxis, sizeof(double));
 
+  double gridding_start = WALLCLOCK_TIME;
+  
   gridding(
       rank,
       size,
@@ -338,6 +368,10 @@ int main(int argc, char **argv)
       uvmin,
       uvmax);
 
+  timing.gridding += WALLCLOCK_TIME - gridding_start;
+
+  double fft_start = WALLCLOCK_TIME;
+  
   fftw_data(
       grid_size_x,
       grid_size_y,
@@ -353,6 +387,10 @@ int main(int argc, char **argv)
       grid,
       gridss);
 
+  timing.fft += WALLCLOCK_TIME - fft_start;
+
+  double phase_start = WALLCLOCK_TIME;
+  
   phase_correction(
       gridss,
       image_real,
@@ -369,9 +407,15 @@ int main(int argc, char **argv)
       rank,
       MPI_COMM_WORLD);
 
+  timing.phase += WALLCLOCK_TIME - phase_start;
+  
   if (rank == 0)
     printf("End of main\n");
 
+  timing.total = WALLCLOCK_TIME - total_start;
+
+  write_timings(rank, timing);
+  
 #ifdef USE_MPI
   MPI_Finalize();
 #endif

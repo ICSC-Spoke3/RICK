@@ -31,4 +31,4 @@ w-stacking: $(OBJECTS) $(DEPS) Makefile
 	clean		
 
 clean:
-	rm *.o rick
+	rm *.o $(EXEC)

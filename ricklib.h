@@ -1,19 +1,10 @@
 #include <mpi.h>
+#include <time.h>
 
 #ifdef _OPENMP
 #define HYBRID_FFTW
 #endif
-/*
-#if !defined(RICK_GPU) && defined( HYBRID_FFTW )
-#include <fftw3-mpi.h>
-#define FFT_INIT    { fftw_init_threads(); fftw_mpi_init();}
-#define FFT_CLEANUP fftw_cleanup_threads()
-#elif !defined(RICK_GPU) && !defined(HYBRID_FFTW)
-#include <fftw3-mpi.h>
-#define FFT_INIT    fftw_mpi_init()
-#define FFT_CLEANUP fftw_cleanup()
-#endif
-*/
+
 void gridding(
     int,
     int,
@@ -71,3 +62,19 @@ void gridding(
     int,
     int,
     MPI_Comm);
+
+/* TIMINGS */
+
+#define WALLCLOCK_TIME ({ struct timespec myts; (clock_gettime( CLOCK_REALTIME, &myts ), (double)myts.tv_sec + (double)myts.tv_nsec * 1e-9);})
+
+
+typedef struct {
+  double IO;         // time spent in IO (MPI-I/O)
+  double gridding;   // time spent in gridding (wstack + reduce (so far)) Contains MPI-I/O when WRITE_DATA is defined;
+  
+  double fft;        // time spent in FFT Contains MPI-I/O when WRITE_DATA is defined;
+  double phase;      // time spent in phase correction Contains MPI-I/O for image writing
+  double total;      // total runtime
+} timing_t;
+
+extern timing_t timing;      // wall-clock process timing
