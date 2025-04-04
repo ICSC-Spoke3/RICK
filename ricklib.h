@@ -3,7 +3,7 @@
 #ifdef _OPENMP
 #define HYBRID_FFTW
 #endif
-
+/*
 #if !defined(RICK_GPU) && defined( HYBRID_FFTW )
 #include <fftw3-mpi.h>
 #define FFT_INIT    { fftw_init_threads(); fftw_mpi_init();}
@@ -13,7 +13,7 @@
 #define FFT_INIT    fftw_mpi_init()
 #define FFT_CLEANUP fftw_cleanup()
 #endif
-
+*/
 void gridding(
     int,
     int,

@@ -26,7 +26,7 @@ int main(int argc, char **argv)
 
   // Define main filenames
   FILE *pFile;
-  FILE *pFile1;
+  MPI_File pFile1;
 
   // Global filename to be composed
   char filename[1000];
@@ -73,8 +73,8 @@ int main(int argc, char **argv)
   double resolution;
 
   // Mesh related parameters: global size
-  int grid_size_x = 1024;
-  int grid_size_y = 1024;
+  int grid_size_x = 4096;
+  int grid_size_y = 4096;
   // Split Mesh size (auto-calculated)
   int local_grid_size_x;
   int local_grid_size_y;
@@ -82,7 +82,7 @@ int main(int argc, char **argv)
   int yaxis;
 
   // Number of planes in the w direction
-  int num_w_planes = 1;
+  int num_w_planes = 8;
 
   // Size of the convoutional kernel support
   int w_support = 7;
@@ -141,8 +141,14 @@ int main(int argc, char **argv)
   xaxis = grid_size_x;
   yaxis = grid_size_y / size;
 
+  /* Account for the case in which grid_size_y % size != 0 */
+  long remy   = grid_size_y % size;
+  long starty = rank * yaxis + (rank < remy ? rank : remy);
+  yaxis       = yaxis + (rank < remy ? 1 : 0);
+  
   int ndatasets = 1;
-  strcpy(datapath_multi[0], "/Users/e.derubeis/hpc_imaging/data/newgauss2noconj_t201806301100_SBL180.binMS/");
+  strcpy(datapath_multi[0], "/u/glacopo/RICK_PMT/newgauss2noconj_t201806301100_SBL180.binMS/");
+  //strcpy(datapath_multi[0], "/home/giovanni/RICK_LIBRARY/RICK/data/newgauss2noconj_t201806301100_SBL180.binMS/");
 
   strcpy(datapath, datapath_multi[0]);
   // Read metadata
@@ -166,12 +172,15 @@ int main(int argc, char **argv)
   Nvis = Nmeasures * freq_per_chan * polarisations;
   Nweights = Nmeasures * freq_per_chan * polarisations;
 
-  long nm_pe = (long)(Nmeasures / size);
-  long remaining = Nmeasures % size;
-  long startrow = rank * nm_pe;
-  if (rank == size - 1)
-    nm_pe = nm_pe + remaining;
-
+  long Nmeasures_tot = Nmeasures;
+  long Nvis_tot      = Nvis;
+  long Nweights_tot  = Nweights;
+  
+  long nm_pe    = (long)(Nmeasures / size);
+  long rem      = Nmeasures % size;
+  long startrow = rank * nm_pe + (rank < rem ? rank : rem);
+  nm_pe         = nm_pe + (rank < rem ? 1 : 0);
+  
   Nmeasures = nm_pe;
   Nvis = Nmeasures * freq_per_chan * polarisations;
   Nweights = Nmeasures * freq_per_chan * polarisations;
@@ -190,58 +199,108 @@ int main(int argc, char **argv)
   visimg = (float *)calloc(Nvis, sizeof(float));
 
   if (rank == 0)
-    printf("READING DATA\n");
-  // Read data
+    printf("READING DATA WITH MPI-I/O\n");
+
+  int ierr;
+
+  
   strcpy(filename, datapath);
   strcat(filename, ufile);
-  // printf("Reading %s\n",filename);
+    
+  ierr = MPI_File_open(MPI_COMM_WORLD, filename, MPI_MODE_RDONLY, MPI_INFO_NULL, &pFile1);
 
-  pFile = fopen(filename, "rb");
-  fseek(pFile, startrow * sizeof(double), SEEK_SET);
-  fread(uu, Nmeasures * sizeof(double), 1, pFile);
-  fclose(pFile);
+  if (ierr != MPI_SUCCESS)
+    {
+      if (rank == 0)
+        fprintf(stderr, "Error: Could not open file '%s' for reading.\n", filename);
+    }
 
+  MPI_Offset offset = sizeof(double) * startrow;
+
+  MPI_File_read_at(pFile1, offset, uu, Nmeasures, MPI_DOUBLE, MPI_STATUS_IGNORE);
+
+  MPI_File_close(&pFile1);
+
+   
   strcpy(filename, datapath);
   strcat(filename, vfile);
-  // printf("Reading %s\n",filename);
+    
+  ierr = MPI_File_open(MPI_COMM_WORLD, filename, MPI_MODE_RDONLY, MPI_INFO_NULL, &pFile1);
 
-  pFile = fopen(filename, "rb");
-  fseek(pFile, startrow * sizeof(double), SEEK_SET);
-  fread(vv, Nmeasures * sizeof(double), 1, pFile);
-  fclose(pFile);
+  if (ierr != MPI_SUCCESS)
+    {
+      if (rank == 0)
+        fprintf(stderr, "Error: Could not open file '%s' for reading.\n", filename);
+    }
+
+  MPI_File_read_at(pFile1, offset, vv, Nmeasures, MPI_DOUBLE, MPI_STATUS_IGNORE);
+
+  MPI_File_close(&pFile1);
 
   strcpy(filename, datapath);
   strcat(filename, wfile);
-  // printf("Reading %s\n",filename);
+    
+  ierr = MPI_File_open(MPI_COMM_WORLD, filename, MPI_MODE_RDONLY, MPI_INFO_NULL, &pFile1);
 
-  pFile = fopen(filename, "rb");
-  fseek(pFile, startrow * sizeof(double), SEEK_SET);
-  fread(ww, Nmeasures * sizeof(double), 1, pFile);
-  fclose(pFile);
+  if (ierr != MPI_SUCCESS)
+    {
+      if (rank == 0)
+        fprintf(stderr, "Error: Could not open file '%s' for reading.\n", filename);
+    }
+
+  MPI_File_read_at(pFile1, offset, ww, Nmeasures, MPI_DOUBLE, MPI_STATUS_IGNORE);
+
+  MPI_File_close(&pFile1);
 
   strcpy(filename, datapath);
   strcat(filename, weightsfile);
-  pFile = fopen(filename, "rb");
-  fseek(pFile, startrow * freq_per_chan * polarisations * sizeof(float), SEEK_SET);
-  fread(weights, (Nweights) * sizeof(float), 1, pFile);
-  fclose(pFile);
+    
+  ierr = MPI_File_open(MPI_COMM_WORLD, filename, MPI_MODE_RDONLY, MPI_INFO_NULL, &pFile1);
 
+  if (ierr != MPI_SUCCESS)
+    {
+      if (rank == 0)
+        fprintf(stderr, "Error: Could not open file '%s' for reading.\n", filename);
+    }
+
+  MPI_Offset offset_w = sizeof(float) * (startrow * freq_per_chan * polarisations);
+  
+  MPI_File_read_at(pFile1, offset_w, weights, Nweights, MPI_FLOAT, MPI_STATUS_IGNORE);
+    
+  MPI_File_close(&pFile1);
+ 
   strcpy(filename, datapath);
   strcat(filename, visrealfile);
-  pFile = fopen(filename, "rb");
-  fseek(pFile, startrow * freq_per_chan * polarisations * sizeof(float), SEEK_SET);
-  fread(visreal, Nvis * sizeof(float), 1, pFile);
-  fclose(pFile);
+    
+  ierr = MPI_File_open(MPI_COMM_WORLD, filename, MPI_MODE_RDONLY, MPI_INFO_NULL, &pFile1);
+
+  if (ierr != MPI_SUCCESS)
+    {
+      if (rank == 0)
+        fprintf(stderr, "Error: Could not open file '%s' for reading.\n", filename);
+    }
+
+  MPI_File_read_at(pFile1, offset_w, visreal, Nvis, MPI_FLOAT, MPI_STATUS_IGNORE);
+
+  MPI_File_close(&pFile1);
+
   strcpy(filename, datapath);
   strcat(filename, visimgfile);
-#ifdef VERBOSE
-  printf("Reading %s\n", filename);
-#endif
-  pFile = fopen(filename, "rb");
-  fseek(pFile, startrow * freq_per_chan * polarisations * sizeof(float), SEEK_SET);
-  fread(visimg, Nvis * sizeof(float), 1, pFile);
-  fclose(pFile);
+    
+  ierr = MPI_File_open(MPI_COMM_WORLD, filename, MPI_MODE_RDONLY, MPI_INFO_NULL, &pFile1);
 
+  if (ierr != MPI_SUCCESS)
+    {
+      if (rank == 0)
+        fprintf(stderr, "Error: Could not open file '%s' for reading.\n", filename);
+    }
+
+  MPI_File_read_at(pFile1, offset_w, visimg, Nvis, MPI_FLOAT, MPI_STATUS_IGNORE);
+  
+  MPI_File_close(&pFile1);
+
+  MPI_Barrier(MPI_COMM_WORLD);
+  
   long size_of_grid = 2 * num_w_planes * xaxis * yaxis;
 
   double *grid;

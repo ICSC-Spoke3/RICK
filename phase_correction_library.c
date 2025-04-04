@@ -126,6 +126,12 @@ void phase_correction(
   int xaxis = xaxistot;
   int yaxis = yaxistot / size;
 
+  /* Account for the case in which grid_size_y % size != 0 */
+  long remy   = yaxistot % size;
+  long starty = rank * yaxis + (rank < remy ? rank : remy);
+  yaxis       = yaxis + (rank < remy ? 1 : 0);
+  
+  
   double resolution = 1.0 / MAX(fabs(uvmin), fabs(uvmax));
 
 #ifdef RICK_GPU
@@ -417,19 +423,43 @@ void phase_correction(
 
 #endif // FITSIO
 
-  MPI_File_open(MYMPI_COMM, fftfile2, MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &pFilereal);
-  MPI_File_open(MYMPI_COMM, fftfile3, MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &pFileimg);
+  int ierr;
+  
+  ierr = MPI_File_open(MYMPI_COMM, fftfile2, MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &pFilereal);
 
-  long global_index = rank * (xaxis * yaxis) * sizeof(long);
+  if (ierr != MPI_SUCCESS)
+    {
+      if (rank == 0)
+	fprintf(stderr, "Error: Could not open file '%s' for writing.\n", fftfile2);
+    }
+  
+  ierr = MPI_File_open(MYMPI_COMM, fftfile3, MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &pFileimg);
 
-  MPI_File_write_at_all(pFilereal, global_index, image_real, xaxis * yaxis, MPI_DOUBLE, MPI_STATUS_IGNORE);
-  MPI_File_write_at_all(pFileimg, global_index, image_imag, xaxis * yaxis, MPI_DOUBLE, MPI_STATUS_IGNORE);
+  if (ierr != MPI_SUCCESS)
+    {
+      if (rank == 0)
+	fprintf(stderr, "Error: Could not open file '%s' for writing.\n", fftfile3);
+    }
 
+  
+  /* To be redefined in case of non-trivial DD */
+  int gsizes[2] = {yaxistot, xaxistot};
+  int lsizes[2] = {yaxis, xaxis};
+  int starts[3] = {starty, 0};
+  
+  MPI_Datatype subarray;
+  MPI_Type_create_subarray(2, gsizes, lsizes, starts, MPI_ORDER_C, MPI_DOUBLE, &subarray);
+  MPI_Type_commit(&subarray);
+
+  MPI_File_set_view(pFilereal, 0, MPI_DOUBLE, subarray, "native", MPI_INFO_NULL);
+  MPI_File_set_view(pFileimg, 0, MPI_DOUBLE, subarray, "native", MPI_INFO_NULL);
+  
+  MPI_File_write_all(pFilereal, image_real, xaxis * yaxis, MPI_DOUBLE, MPI_STATUS_IGNORE);
+  MPI_File_write_all(pFileimg, image_imag, xaxis * yaxis, MPI_DOUBLE, MPI_STATUS_IGNORE);
+
+  MPI_Type_free(&subarray);
   MPI_File_close(&pFilereal);
   MPI_File_close(&pFileimg);
 
-  if (size > 1)
-  {
-    MPI_Barrier(MYMPI_COMM);
-  }
+  MPI_Barrier(MYMPI_COMM);
 }

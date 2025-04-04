@@ -1009,9 +1009,59 @@ void gridding_data(
   double *gridss_real = (double *)malloc(size_of_grid / 2 * sizeof(double));
   double *gridss_img = (double *)malloc(size_of_grid / 2 * sizeof(double));
 
-  MPI_File_open(MYMYMPI_COMM, gridded_writedata1, MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &pFilereal);
-  MPI_File_open(MYMYMPI_COMM, gridded_writedata2, MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &pFileimg);
+  for (unsigned int i = 0; i < size_of_grid / 2; i++)
+    {
+      gridss_real[i] = grid[2 * i];
+      gridss_img[i]  = grid[2 * i + 1];
+    }
+    
+  int ierr;
+  ierr = MPI_File_open(MYMYMPI_COMM, gridded_writedata1, MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &pFilereal);
 
+  if (ierr != MPI_SUCCESS)
+    {
+      if (rank == 0)
+	fprintf(stderr, "Error: Could not open file '%s' for writing.\n", gridded_writedata1);
+    }
+  
+  ierr = MPI_File_open(MYMYMPI_COMM, gridded_writedata2, MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &pFileimg);
+
+  if (ierr != MPI_SUCCESS)
+    {
+      if (rank == 0)
+	fprintf(stderr, "Error: Could not open file '%s' for writing.\n", gridded_writedata2);
+    }
+
+  /* TO BE REDEFINED IN CASE OF NON-TRIVIAL DD */
+  int gsizes[3] = {num_w_planes, yaxis*size, xaxis};
+  int lsizes[3] = {num_w_planes, yaxis, xaxis};
+  int starts[3] = {0, rank*yaxis, 0};
+
+  MPI_Datatype subarray;
+  MPI_Type_create_subarray(3, gsizes, lsizes, starts, MPI_ORDER_C, MPI_DOUBLE, &subarray);
+  MPI_Type_commit(&subarray);
+
+  MPI_File_set_view(pFilereal, 0, MPI_DOUBLE, subarray, "native", MPI_INFO_NULL);
+  MPI_File_set_view(pFileimg, 0, MPI_DOUBLE, subarray, "native", MPI_INFO_NULL);
+    
+  MPI_File_write_all(pFilereal, gridss_real, size_of_grid / 2, MPI_DOUBLE, MPI_STATUS_IGNORE);
+  MPI_File_write_all(pFileimg, gridss_img, size_of_grid / 2, MPI_DOUBLE, MPI_STATUS_IGNORE);
+
+  MPI_Type_free(&subarray);
+
+  MPI_File_close(&pFilereal);
+  MPI_File_close(&pFileimg);
+
+  MPI_Barrier(MYMPI_COMM);
+  
+  free(gridss_real);
+  free(gridss_img);
+
+ #endif // WRITE_DATA
+  return;
+}
+
+  /*
   for (int isector = 0; isector < size; isector++)
   {
 #ifdef RING // Let the MPI_Get copy from the right location (Results must be checked!) [GL]
@@ -1030,8 +1080,8 @@ void gridding_data(
           {
             unsigned int global_index = (iu + (iv + isector * yaxis) * xaxis + iw * grid_size_x * grid_size_y) * sizeof(double);
             unsigned int index = iu + iv * xaxis + iw * xaxis * yaxis;
-            MPI_File_write_at_all(pFilereal, global_index, &gridss_real[index], size_of_grid / 2, MPI_DOUBLE, MPI_STATUS_IGNORE);
-            MPI_File_write_at_all(pFileimg, global_index, &gridss_img[index], size_of_grid / 2, MPI_DOUBLE, MPI_STATUS_IGNORE);
+            MPI_File_write_at_all(pFilereal, global_index, &gridss_real[index], 1, MPI_DOUBLE, MPI_STATUS_IGNORE);
+            MPI_File_write_at_all(pFileimg, global_index, &gridss_img[index], 1, MPI_DOUBLE, MPI_STATUS_IGNORE);
           }
     }
     else
@@ -1045,21 +1095,7 @@ void gridding_data(
       }
     }
   }
-  MPI_File_close(&pFilereal);
-  MPI_File_close(&pFileimg);
-
-  free(gridss_real);
-  free(gridss_img);
-
-  if (size > 1)
-  {
-    MPI_Barrier(MYMYMPI_COMM);
-  }
-#endif // WRITE_DATA
-
-  return;
-}
-
+  */
 void gridding(
     int rank,
     int size,
@@ -1095,6 +1131,12 @@ void gridding(
 
   int xaxis = grid_size_x;
   int yaxis = grid_size_y / size;
+
+  /* Account for the case in which grid_size_y % size != 0 */
+  long remy   = grid_size_y % size;
+  long starty = rank * yaxis + (rank < remy ? rank : remy);
+  yaxis       = yaxis + (rank < remy ? 1 : 0);
+    
   int size_of_grid = 2 * num_w_planes * xaxis * yaxis;
 
   double dx = 1.0 / (double)grid_size_x;
