@@ -9,7 +9,7 @@
 #ifdef FITSIO
 #include "fitsio.h"
 #endif
-#include <omp.h>
+// #include <omp.h>
 
 #define PI 3.14159265359
 #define FILENAMELENGTH 30
@@ -392,7 +392,6 @@ void phase_correction(
     MPI_Barrier(MYMPI_COMM);
   }
 
-
 #ifdef FITSIO
   unsigned int *fpixel = (unsigned int *)malloc(sizeof(unsigned int) * naxis);
   unsigned int *lpixel = (unsigned int *)malloc(sizeof(unsigned int) * naxis);
@@ -420,10 +419,10 @@ void phase_correction(
   MPI_File_open(MYMPI_COMM, fftfile2, MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &pFilereal);
   MPI_File_open(MYMPI_COMM, fftfile3, MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &pFileimg);
 
-  long global_index = rank * (xaxis * yaxis) * sizeof(long);
+  MPI_Offset offset = (MPI_Offset)rank * xaxis * yaxis * sizeof(double);
 
-  MPI_File_write_at_all(pFilereal, global_index, image_real, xaxis * yaxis, MPI_DOUBLE, MPI_STATUS_IGNORE);
-  MPI_File_write_at_all(pFileimg, global_index, image_imag, xaxis * yaxis, MPI_DOUBLE, MPI_STATUS_IGNORE);
+  MPI_File_write_at(pFilereal, offset, image_real, xaxis * yaxis, MPI_DOUBLE, MPI_STATUS_IGNORE);
+  MPI_File_write_at(pFileimg, offset, image_imag, xaxis * yaxis, MPI_DOUBLE, MPI_STATUS_IGNORE);
 
   MPI_File_close(&pFilereal);
   MPI_File_close(&pFileimg);
