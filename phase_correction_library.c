@@ -107,6 +107,9 @@ void phase_correction(
     int num_w_planes,
     int xaxistot,
     int yaxistot,
+    int xaxis,
+    int yaxis,
+    int y_start,
     double wmin,
     double wmax,
     double uvmin,
@@ -123,14 +126,6 @@ void phase_correction(
   double wterm = wmin + 0.5 * dw;
   double dwnorm = dw / (wmax - wmin);
 
-  int xaxis = xaxistot;
-  int yaxis = yaxistot / size;
-
-  /* Account for the case in which grid_size_y % size != 0 */
-  long remy   = yaxistot % size;
-  long starty = rank * yaxis + (rank < remy ? rank : remy);
-  yaxis       = yaxis + (rank < remy ? 1 : 0);
-  
   
   double resolution = 1.0 / MAX(fabs(uvmin), fabs(uvmax));
 
@@ -222,15 +217,16 @@ void phase_correction(
     printf("Hello from thread %d out of %d of task %d\n", omp_get_thread_num(), omp_get_num_threads(), rank);
   }
   */
-#pragma omp parallel for collapse(2) private(wterm)
+
+ #pragma omp parallel for collapse(2) private(wterm)
   for (int iw = 0; iw < num_w_planes; iw++)
   {
     for (int iv = 0; iv < yaxis; iv++)
       for (int iu = 0; iu < xaxis; iu++)
       {
 
-        int index = 2 * (iu + iv * xaxis + xaxis * yaxis * iw);
-        int img_index = iu + iv * xaxis;
+        myull index = 2 * (iu + iv * xaxis + xaxis * yaxis * iw);
+        myull img_index = iu + iv * xaxis;
         wterm = wmin + iw * dw;
 #ifdef PHASE_ON
         if (num_w_planes > 1)
@@ -289,7 +285,7 @@ void phase_correction(
 #endif // end of PHASE_ON
       }
   }
-
+  
 #else
   omp_set_default_device(rank % omp_get_num_devices());
 
@@ -445,7 +441,7 @@ void phase_correction(
   /* To be redefined in case of non-trivial DD */
   int gsizes[2] = {yaxistot, xaxistot};
   int lsizes[2] = {yaxis, xaxis};
-  int starts[3] = {starty, 0};
+  int starts[2] = {y_start, 0};
   
   MPI_Datatype subarray;
   MPI_Type_create_subarray(2, gsizes, lsizes, starts, MPI_ORDER_C, MPI_DOUBLE, &subarray);

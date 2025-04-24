@@ -1,4 +1,4 @@
-HEFFTE = /beegfs/glacopo/heffte_gen10/local
+HEFFTE = /u/glacopo/heffte/local
 
 INC   =  -I$(HEFFTE)/include
 
@@ -12,9 +12,9 @@ OPT += -DGAUSS
 OPT += -DUSE_MPI
 OPT += -DPHASE_ON
 OPT += -DSTOKESI
-#OPT += WRITE_DATA
+#OPT += -DWRITE_DATA
 
-FLAGS   = -O3 -march=native -mavx -mavx512f 
+FLAGS   = -O3 -march=native -mavx -mavx2 
 
 # Source files #
 
