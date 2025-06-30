@@ -1,14 +1,22 @@
-USE_MPI = 0
-
 import numpy as np
 import casacore.tables as pt
 import time
 import sys
 import os
+import argparse
 
-#outpath = '/data/gridding/data/shortgauss_t201806301100_SBH255.binMS/'
-print(sys.argv[1])
-outpath = "/data/gridding/data/Lofarbig/"+sys.argv[1]+".binMS/"
+
+parser = argparse.ArgumentParser(description='Convert a MS to a binary MS for RICK.')
+parser.add_argument('--mpi', help='Use mpi4py', action='store_true')
+parser.add_argument('msfile', nargs=1, help='Input MS')
+args = parser.parse_args()
+
+msfile = args.msfile[0]
+print(str(msfile))
+try:
+   outpath = msfile.replace(".ms", "") + ".binMS/"
+except AttributeError:
+   outpath = msfile.replace(".MS", "") + ".binMS/"
 os.mkdir(outpath)
 
 
@@ -18,11 +26,12 @@ wfile = 'wcoord.bin'
 weights = 'weights.bin'
 visrealfile = 'visibilities_real.bin'
 visimgfile = 'visibilities_img.bin'
+list_freq_file = 'freq_file.bin'
 metafile = 'meta.txt'
 
 offset = 0.0
 
-if USE_MPI == 1:
+if args.mpi:
    from mpi4py import MPI
    comm = MPI.COMM_WORLD
    rank = comm.Get_rank()
@@ -37,9 +46,12 @@ num_threads = 1
 
 # input MS
 readtime0 = time.time()
-#msfile = "/data/Lofar-data/results/L798046_SB244_uv.uncorr_130B27932t_146MHz.pre-cal.ms"
-msfile = "/data/Lofar-Luca/results/"+sys.argv[1]+".ms/"
 ms = pt.table(msfile, readonly=True, ack=False)
+
+with pt.table(msfile + "::OBSERVATION", ack=False) as obstab:
+  telescope = obstab.getcol("TELESCOPE_NAME")[0]
+  
+print("Telescope: ", telescope)
 
 if rank == 0:
  print("Reading ", msfile)
@@ -47,10 +59,13 @@ if rank == 0:
 # load data and metadata
  with pt.table(msfile + '::SPECTRAL_WINDOW', ack=False) as freqtab:
     freq = freqtab.getcol('REF_FREQUENCY')[0] / 1000000.0
+    freq_list = freqtab.getcol('CHAN_FREQ')[0]  # list of frequencies
     freqpersample = np.mean(freqtab.getcol('RESOLUTION'))
     timepersample = ms.getcell('INTERVAL',0)
 
- print("Frequencies (MHz)   : ",freq)
+ freq_list = freq_list.flatten()
+ print(freq_list)
+ print("Reference frequency (MHz)   : ",freq)
  print("Time interval (sec) : ",timepersample)
 
  with pt.taql("SELECT ANTENNA1,ANTENNA2,sqrt(sumsqr(UVW)),GCOUNT() FROM $ms GROUPBY ANTENNA1,ANTENNA2") as BL:
@@ -79,7 +94,7 @@ else:
  nm_pe = None
  remaining = None
 
-if USE_MPI == 1:
+if args.mpi:
  nm_pe = comm.bcast(nm_pe, root=0)
  remaining = comm.bcast(remaining, root=0)
 
@@ -95,9 +110,18 @@ nrow = nm_pe
 # read data
 uvw = ms.getcol('UVW',startrow,nrow)
 vis = ms.getcol('DATA',startrow,nrow)
-weight = ms.getcol('WEIGHT_SPECTRUM',startrow,nrow)
+flag = ms.getcol('FLAG', startrow, nrow)
+vis[flag] = 0 + 0j
+
+
+try:
+   weight = ms.getcol('WEIGHT_SPECTRUM',startrow,nrow)
+except AttributeError:
+   weight = ms.getcol('WEIGHT',startrow,nrow)
+
+weight[flag] = 0.0
 print("Freqs per channel   : ",vis.shape[1])
-print("Polarizations       : ",vis.shape[2])
+print("Correlations       : ",vis.shape[2])
 print("Number of observations : ",uvw.shape[0])
 print("Data size (MB)      : ",uvw.shape[0]*vis.shape[1]*vis.shape[2]*2*4/1024.0/1024.0)
 
@@ -137,7 +161,7 @@ maxv = np.amax(abs(vv_ser))
 minw = np.amin(ww_ser)
 maxw = np.amax(ww_ser)
 
-if USE_MPI == 1:
+if args.mpi:
    maxu_all = np.array(0,dtype=np.float)
    maxv_all = np.array(0,dtype=np.float)
    maxw_all = np.array(0,dtype=np.float)
@@ -199,6 +223,8 @@ if rank == 0:
  vis_ser_real.tofile(outfile,sep='')
  outfile = outpath+visimgfile
  vis_ser_img.tofile(outfile,sep='')
+ outfile = outpath+list_freq_file
+ freq_list.tofile(outfile, sep='')
  outfile = outpath+metafile
  f = open(outfile, 'w')
  f.writelines(str(uu_ser.size)+"\n")
@@ -214,5 +240,3 @@ if rank == 0:
  f.writelines(str(minw)+"\n")
  f.writelines(str(maxw)+"\n")
  f.close()
-
-
