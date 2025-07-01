@@ -63,8 +63,8 @@ if rank == 0:
     freqpersample = np.mean(freqtab.getcol('RESOLUTION'))
     timepersample = ms.getcell('INTERVAL',0)
 
- freq_list = freq_list.flatten()
- print(freq_list)
+ freq_list_flat = freq_list.flatten()
+ print(freq_list_flat)
  print("Reference frequency (MHz)   : ",freq)
  print("Time interval (sec) : ",timepersample)
 
@@ -113,11 +113,10 @@ vis = ms.getcol('DATA',startrow,nrow)
 flag = ms.getcol('FLAG', startrow, nrow)
 vis[flag] = 0 + 0j
 
-
 try:
-   weight = ms.getcol('WEIGHT_SPECTRUM',startrow,nrow)
-except AttributeError:
-   weight = ms.getcol('WEIGHT',startrow,nrow)
+   weight = ms.getcol('WEIGHT_SPECTRUM', startrow, nrow)
+except Exception:
+   weight = ms.getcol('WEIGHT', startrow, nrow)
 
 weight[flag] = 0.0
 print("Freqs per channel   : ",vis.shape[1])
@@ -217,14 +216,12 @@ if rank == 0:
  ww_ser.tofile(outfile,sep='')
  outfile = outpath+weights
  weight_ser.tofile(outfile,sep='')
- outfile = outpath+weights
- weight_ser.tofile(outfile,sep='')
  outfile = outpath+visrealfile
  vis_ser_real.tofile(outfile,sep='')
  outfile = outpath+visimgfile
  vis_ser_img.tofile(outfile,sep='')
  outfile = outpath+list_freq_file
- freq_list.tofile(outfile, sep='')
+ freq_list_flat.astype(np.float32).tofile(outfile, sep='')
  outfile = outpath+metafile
  f = open(outfile, 'w')
  f.writelines(str(uu_ser.size)+"\n")
@@ -239,4 +236,10 @@ if rank == 0:
  f.writelines(str(maxg)+"\n")
  f.writelines(str(minw)+"\n")
  f.writelines(str(maxw)+"\n")
+ f.writelines(str(weight.shape[0])+"\n")
+ f.writelines(str(weight.shape[1])+"\n")
+ try:
+   f.writelines(str(weight.shape[2])+"\n")
+ except Exception:
+   f.writelines("1.0\n")
  f.close()
