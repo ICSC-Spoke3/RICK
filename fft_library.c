@@ -12,7 +12,7 @@
 #include <cuda_runtime.h>
 #endif
 #include "ricklib.h"
-#include <omp.h>
+// #include <omp.h>
 
 void fftw_data(
     int grid_size_x,
@@ -22,8 +22,10 @@ void fftw_data(
     MPI_Comm MYMPI_COMM,
     int size,
     int rank,
+#if defined(WRITE_DATA)
     char *fftfile_writedata1,
     char *fftfile_writedata2,
+#endif
     double *grid,
     double *gridss)
 {

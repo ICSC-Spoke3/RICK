@@ -100,6 +100,22 @@ __global__ void phase_g(int xaxis,
 
 #endif
 
+void initializePhaseCorrectionTable(double *lookupTable, int xaxis, int yaxis, double resolution) {
+  for (int iv = 0; iv < yaxis; iv++) {
+      for (int iu = 0; iu < xaxis; iu++) {
+          double xcoord = sin((iu - xaxis / 2) * resolution);
+          double ycoord = sin((iv - yaxis / 2) * resolution);
+          double radius2 = xcoord * xcoord + ycoord * ycoord;
+
+          if (radius2 < 1.0) {
+              lookupTable[iu + iv * xaxis] = sqrt(1.0 - radius2) - 1.0;
+          } else {
+              lookupTable[iu + iv * xaxis] = 0.0;
+          }
+      }
+  }
+}
+
 void phase_correction(
     double *gridss,
     double *image_real,
@@ -127,6 +143,8 @@ void phase_correction(
   int yaxis = yaxistot / size;
 
   double resolution = 1.0 / MAX(fabs(uvmin), fabs(uvmax));
+
+  // double resolution = 0.000002;
 
 #ifdef RICK_GPU
 
@@ -296,70 +314,66 @@ void phase_correction(
 #pragma omp target teams distribute parallel for collapse(2) private(wterm) map(to : gridss[0 : 2 * num_w_planes * xaxis * yaxis]) map(from : image_real[0 : xaxis * yaxis]) map(from : image_imag[0 : xaxis * yaxis])
 #endif
 
+  double *phaseCorrectionTable = (double *)malloc(xaxis * yaxis * sizeof(double));
+  initializePhaseCorrectionTable(phaseCorrectionTable, xaxis, yaxis, resolution);
+
   for (int iw = 0; iw < num_w_planes; iw++)
   {
     for (int iv = 0; iv < yaxis; iv++)
+    {
       for (int iu = 0; iu < xaxis; iu++)
       {
 
         long index = 2 * (iu + iv * xaxis + xaxis * yaxis * iw);
         long img_index = iu + iv * xaxis;
         wterm = wmin + iw * dw;
+
 #ifdef PHASE_ON
-        if (num_w_planes > 1)
+
+        double correction = phaseCorrectionTable[iu + iv * xaxis];
+        double preal, pimag;
+
+        if (correction != 0.0)
         {
-          double xcoord = (double)(iu - xaxistot / 2);
-          if (xcoord < 0.0)
-            xcoord = (double)(iu + xaxistot / 2);
-          xcoord = sin(xcoord * resolution);
-          double ycoord = (double)(iv - yaxistot / 2);
-          if (ycoord < 0.0)
-            ycoord = (double)(iv + yaxistot / 2);
-          ycoord = sin(ycoord * resolution);
-
-          double preal, pimag;
-          double radius2 = (xcoord * xcoord + ycoord * ycoord);
-          if (xcoord <= 1.0)
-          {
-            preal = cos(2.0 * PI * wterm * (sqrt(1 - radius2) - 1.0));
-            pimag = sin(2.0 * PI * wterm * (sqrt(1 - radius2) - 1.0));
-          }
-          else
-          {
-            preal = cos(-2.0 * PI * wterm * (sqrt(radius2 - 1.0) - 1));
-            pimag = 0.0;
-          }
-
-          preal = cos(2.0 * PI * wterm * (sqrt(1 - radius2) - 1.0));
-          pimag = sin(2.0 * PI * wterm * (sqrt(1 - radius2) - 1.0));
-
-          double p, q, r, s;
-          p = gridss[index];
-          q = gridss[index + 1];
-          r = preal;
-          s = pimag;
-
-        // printf("%d %d %d %ld %ld\n",iu,iv,iw,index,img_index);
-#pragma omp atomic
-          image_real[img_index] += (p * r - q * s) * dwnorm * sqrt(1 - radius2);
-#pragma omp atomic
-          image_imag[img_index] += (p * s + q * r) * dwnorm * sqrt(1 - radius2);
+          preal = cos(2.0 * PI * wterm * correction);
+          pimag = sin(2.0 * PI * wterm * correction);
         }
         else
         {
-#pragma omp atomic
-          image_real[img_index] += gridss[index];
-#pragma omp atomic
-          image_imag[img_index] += gridss[index + 1];
+          preal = 1.0;
+          pimag = 0.0;
         }
+
+        double p, q, r, s;
+        p = gridss[index];
+        q = gridss[index + 1];
+        r = preal;
+        s = pimag;
+
+        // printf("%d %d %d %ld %ld\n",iu,iv,iw,index,img_index);
+#pragma omp atomic
+        image_real[img_index] += (p * r - q * s) * dwnorm;
+#pragma omp atomic
+        image_imag[img_index] += (p * s + q * r) * dwnorm;
+      }
+      else
+      {
+#pragma omp atomic
+        image_real[img_index] += gridss[index];
+#pragma omp atomic
+        image_imag[img_index] += gridss[index + 1];
+      }
 #else
 #pragma omp atomic
         image_real[img_index] += gridss[index];
 #pragma omp atomic
         image_imag[img_index] += gridss[index + 1];
 #endif // end of PHASE_ON
-      }
+    }
   }
+}
+
+free(phaseCorrectionTable);
 
 #endif
 

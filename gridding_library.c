@@ -6,7 +6,7 @@
 #include <unistd.h>
 #include <stdatomic.h>
 #include "ricklib.h"
-#include <omp.h>
+// #include <omp.h>
 
 #define PI 3.14159265359
 #define NTHREADS 32
@@ -21,12 +21,14 @@
 int *histo_send;
 int **sectorarray;
 
-float weights_stokes_sum;
-
 #if defined(STOKESI) || defined(STOKESQ) || defined(STOKESU)
-float *visreal_stokes;
-float *visimg_stokes;
-float *weights_stokes;
+float *visreal_stokes_ch;
+float *visimg_stokes_ch;
+float *weights_stokes_ch;
+#else
+float *visreal_ch;
+float *visimg_ch;
+float *weights_ch;
 #endif
 
 // Convolution kernels
@@ -127,75 +129,52 @@ void weighting_briggs(
   weight_uv_2[iKer] += (weight[visindex] * weight[visindex]);
 }
 
-/*
-
-Stokes collapsing
-
-*/
-
-void stokes(
+void channelselect(
     unsigned int Nmeasures,
     int freq_per_chan,
+    #if defined(STOKESI) || defined(STOKESQ) || defined(STOKESU)
+    float *visreal_stokes,
+    float *visimg_stokes,
+    float *weights_stokes,
+    #else
     float *visreal,
     float *visimg,
-    float *weights)
+    float *weights,
+    #endif
+    int freq_index)
 {
-  // In this way we select and combine correlations to form Stokes parameters
+  #if defined(STOKESI) || defined(STOKESQ) || defined(STOKESU)
+  visreal_stokes_ch = (float *)malloc(Nmeasures * freq_per_chan * sizeof(float));
+  visimg_stokes_ch = (float *)malloc(Nmeasures * freq_per_chan * sizeof(float));
+  weights_stokes_ch = (float *)malloc(Nmeasures * freq_per_chan * sizeof(float));
+  #else
+  visreal_ch = (float *)malloc(Nmeasures * freq_per_chan * sizeof(float));
+  visimg_ch = (float *)malloc(Nmeasures * freq_per_chan * sizeof(float));
+  weights_ch = (float *)malloc(Nmeasures * freq_per_chan * sizeof(float));
+  #endif
 
-#if !defined(WEIGHTING_UNIFORM) || !defined(WEIGHTING_BRIGGS)
-  weights_stokes_sum = 0.0;
-#endif
+  for (unsigned int ichan = 0; ichan < Nmeasures; ichan++)
+  {
+    #if defined(STOKESI) || defined(STOKESQ) || defined(STOKESU)
+    visreal_stokes_ch[ichan] = visreal_stokes[ichan * freq_per_chan + freq_index];
+    visimg_stokes_ch[ichan] = visimg_stokes[ichan * freq_per_chan + freq_index];
+    weights_stokes_ch[ichan] = weights_stokes[ichan * freq_per_chan + freq_index];
+    #else
+    visreal_ch[ichan] = visreal[ichan * freq_per_chan + freq_index];
+    visimg_ch[ichan] = visimg[ichan * freq_per_chan + freq_index];
+    weights_ch[ichan] = weights[ichan * freq_per_chan + freq_index];
+    #endif
+  }
 
-#if defined(STOKESI)
-  visreal_stokes = (float *)malloc(Nmeasures * freq_per_chan * sizeof(float));
-  visimg_stokes = (float *)malloc(Nmeasures * freq_per_chan * sizeof(float));
-  weights_stokes = (float *)malloc(Nmeasures * freq_per_chan * sizeof(float));
-  for (unsigned int i = 0; i < (Nmeasures * freq_per_chan); i++)
-  {
-    visreal_stokes[i] = 0.5 * (visreal[i * 4] + visreal[(i * 4) + 3]);
-    visimg_stokes[i] = 0.5 * (visimg[i * 4] + visimg[(i * 4) + 3]);
-    weights_stokes[i] = 0.25 * (weights[i * 4] + weights[(i * 4) + 3]);
-#if !defined(WEIGHTING_UNIFORM) || !defined(WEIGHTING_BRIGGS)
-    weights_stokes_sum += weights_stokes[i];
-#endif
-  }
-  // printf("Sum weights Stokes I %f\n", weights_stokes_sum);
-#elif defined(STOKESQ)
-  visreal_stokes = (float *)malloc(Nmeasures * freq_per_chan * sizeof(float));
-  visimg_stokes = (float *)malloc(Nmeasures * freq_per_chan * sizeof(float));
-  weights_stokes = (float *)malloc(Nmeasures * freq_per_chan * sizeof(float));
-  for (unsigned int i = 0; i < (Nmeasures * freq_per_chan); i++)
-  {
-    visreal_stokes[i] = 0.5 * (visreal[i * 4] - visreal[(i * 4) + 3]);
-    visimg_stokes[i] = 0.5 * (visimg[i * 4] - visimg[(i * 4) + 3]);
-    weights_stokes[i] = weights[i * 4];
-#if !defined(WEIGHTING_UNIFORM) || !defined(WEIGHTING_BRIGGS)
-    weights_stokes_sum += weights_stokes[i];
-#endif
-  }
-#elif defined(STOKESU)
-  visreal_stokes = (float *)malloc(Nmeasures * freq_per_chan * sizeof(float));
-  visimg_stokes = (float *)malloc(Nmeasures * freq_per_chan * sizeof(float));
-  weights_stokes = (float *)malloc(Nmeasures * freq_per_chan * sizeof(float));
-  for (unsigned int i = 0; i < (Nmeasures * freq_per_chan); i++)
-  {
-    visreal_stokes[i] = 0.5 * (visreal[(i * 4) + 1] + visreal[(i * 4) + 2]);
-    visimg_stokes[i] = 0.5 * (visimg[(i * 4) + 1] + visimg[(i * 4) + 2]);
-    weights_stokes[i] = weights[i * 4];
-#if !defined(WEIGHTING_UNIFORM) || !defined(WEIGHTING_BRIGGS)
-    weights_stokes_sum += weights_stokes[i];
-#endif
-  }
-// #elif defined(STOKESV)
-// float * visreal_stokesI = (float *)malloc(Nmeasures * freq_per_chan * sizeof(float));
-// float * visimg_stokesI = (float *)malloc(Nmeasures * freq_per_chan * sizeof(float));
-// float * weights_stokesI = (float *)malloc(Nmeasures * freq_per_chan * sizeof(float));
-#endif
-
-  // printf("Sum of all Stokes I weights %f\n", weights_stokes_sum);
+  #if defined(STOKESI) || defined(STOKESQ) || defined(STOKESU)
+  free(visreal_stokes);
+  free(visimg_stokes);
+  free(weights_stokes);
+  #else
   free(visreal);
   free(visimg);
   free(weights);
+  #endif
 }
 
 #ifdef RICK_GPU
@@ -589,7 +568,7 @@ void wstack(
 
 #if defined(ACCOMP) && (GPU_STACKING)
   omp_set_default_device(rank % omp_get_num_devices());
-  long Nvis = num_points * freq_per_chan;
+  long Nvis = num_points;
   printf("Nvis\n");
 #pragma omp target teams distribute parallel for private(visindex) map(to : uu[0 : num_points], vv[0 : num_points], ww[0 : num_points], vis_real[0 : Nvis], vis_img[0 : Nvis], weight[0 : Nvis / freq_per_chan]) map(tofrom : grid[0 : 2 * num_w_planes * grid_size_x * grid_size_y])
 #else
@@ -606,14 +585,14 @@ void wstack(
   float *weight_uv;
   float *weight_uv_2;
 
-  out_weight_uniform = (float *)malloc(num_points * freq_per_chan * sizeof(float));
+  out_weight_uniform = (float *)malloc(num_points * sizeof(float));
   weight_uv = (float *)malloc(grid_size_x * grid_size_y * num_w_planes * sizeof(float));
   weight_uv_2 = (float *)malloc(grid_size_x * grid_size_y * num_w_planes * sizeof(float));
   robustness = (float *)malloc(grid_size_x * grid_size_y * num_w_planes * size * sizeof(float));
 
   for (i = 0; i < num_points; i++)
   {
-    visindex = i * freq_per_chan;
+    visindex = i;
 
     double sum = 0.0;
     int j, k;
@@ -666,7 +645,7 @@ void wstack(
     // printf("%d\n",tid);
 #endif
 
-    visindex = i * freq_per_chan;
+    visindex = i;
 
     double sum = 0.0;
     int j, k;
@@ -734,7 +713,7 @@ void wstack(
         double add_term_img = 0.0;
         unsigned int ifine = visindex;
         // DAV: the following two loops are performend by each thread separately: no problems of race conditions
-        for (int ifreq = 0; ifreq < freq_per_chan; ifreq++)
+        for (int ifreq = 0; ifreq < 1; ifreq++)
         {
           // int iweight = visindex / freq_per_chan;
           // for (int ipol = 0; ipol < polarizations; ipol++)
@@ -832,15 +811,15 @@ void gridding_data(
   // calculate the resolution in arcsec
   double resolution_asec = (3600.0 * 180.0) / MAX(fabs(uvmin), fabs(uvmax)) / PI;
   if (rank == 0)
-    printf("RESOLUTION = %f rad, %f arcsec\n", resolution, resolution_asec);
+    printf("Theoretical beam = %f rad, %f arcsec\n", resolution, resolution_asec);
 
   for (int isector = 0; isector < size; isector++)
   {
     // double start = CPU_TIME_wt;
 
     int Nsec = histo_send[isector];
-    long Nweightss = Nsec * freq_per_chan;
-    long Nvissec = Nsec * freq_per_chan;
+    long Nweightss = Nsec;
+    long Nvissec = Nsec;
 
     // EDR: this should probably be updated
     double_t *memory = (double *)malloc((Nsec * 3) * sizeof(double_t) +
@@ -875,11 +854,11 @@ void gridding_data(
         ip++;
       }
       */
-      for (int ifreq = 0; ifreq < freq_per_chan; ifreq++)
+      for (int ifreq = 0; ifreq < 1; ifreq++)
       {
-        visreals[inu] = visreal[ilocal * freq_per_chan + ifreq];
-        visimgs[inu] = visimg[ilocal * freq_per_chan + ifreq];
-        weightss[inu] = weights[ilocal * freq_per_chan + ifreq];
+        visreals[inu] = visreal[ilocal * 1 + ifreq];
+        visimgs[inu] = visimg[ilocal * 1 + ifreq];
+        weightss[inu] = weights[ilocal * 1 + ifreq];
         inu++;
       }
       icount++;
@@ -1081,11 +1060,18 @@ void gridding(
     char *gridded_writedata1,
     char *gridded_writedata2,
 #endif
+#if defined(STOKESI) || defined(STOKESQ) || defined(STOKESU)
+    float *visreal_stokes,
+    float *visimg_stokes,
+    float *weights_stokes,
+#else
     float *visreal,
     float *visimg,
     float *weights,
+#endif
     double uvmin,
-    double uvmax)
+    double uvmax,
+    int freq_index)
 {
 
   if (rank == 0)
@@ -1096,6 +1082,9 @@ void gridding(
   int xaxis = grid_size_x;
   int yaxis = grid_size_y / size;
   int size_of_grid = 2 * num_w_planes * xaxis * yaxis;
+
+  // Pixel size in radians
+  // float pixsize_x = 0.000002;
 
   double dx = 1.0 / (double)grid_size_x;
   double dw = 1.0 / (double)num_w_planes;
@@ -1111,13 +1100,19 @@ void gridding(
       yaxis,
       dx);
 
-  // Collapse correlations into Stokes parameters
-  stokes(
+  channelselect(
       nmeasures,
       freq_per_chan,
+#if defined(STOKESI) || defined(STOKESQ) || defined(STOKESU)
+      visreal_stokes,
+      visimg_stokes,
+      weights_stokes,
+#else
       visreal,
       visimg,
-      weights);
+      weights,
+#endif
+      freq_index);
 
   // Sector and Gridding data
   gridding_data(
@@ -1142,15 +1137,15 @@ void gridding(
       ww,
       grid,
       gridss,
-      // #if defined(STOKESI) || defined(STOKESQ) || defined(STOKESU)
-      visreal_stokes,
-      visimg_stokes,
-      weights_stokes,
-// #else
-//       visreal,
-//       visimg,
-//       weights,
-// #endif
+#if defined(STOKESI) || defined(STOKESQ) || defined(STOKESU)
+      visreal_stokes_ch,
+      visimg_stokes_ch,
+      weights_stokes_ch,
+#else
+      visreal_ch,
+      visimg_ch,
+      weights_ch,
+#endif
 #if defined(WRITE_DATA)
       gridded_writedata1,
       gridded_writedata2,
