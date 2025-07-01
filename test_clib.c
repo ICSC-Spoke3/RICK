@@ -19,6 +19,11 @@
 #define MIN(X, Y) (((X) < (Y)) ? (X) : (Y))
 #define MAX(X, Y) (((X) > (Y)) ? (X) : (Y))
 
+#if defined(OMP_ACCELERATION)
+int devID;
+#endif //OMP_ACCELERATION
+
+
 
 /* Struct for domain decomposition */
 typedef struct {
@@ -64,7 +69,7 @@ int exchange_Npts ( myull *to_be_sent, myull *to_be_recv, int Me, int Ntasks, MP
 
     }
   
-  
+  return 0;
 }
 
 int exchange_double ( myull *to_be_sent, myull *to_be_recv, double *data_to_be_sent, double *data_to_be_recv, int Me, int Ntasks, MPI_Comm COMM )
@@ -120,9 +125,10 @@ int exchange_double ( myull *to_be_sent, myull *to_be_recv, double *data_to_be_s
 	      printf("[OFFSET]: %d <--> %d, send offset %llu, recv offset %llu\n",
 		     Me, target, offset, offset_r);
 	     #endif
-		
+
 	      
-	      MPI_Sendrecv( &data_to_be_sent[offset], to_be_sent[target]*sizeof(double), MPI_BYTE, target, SEND_DATA,
+	      
+	      MPI_Sendrecv_custom( &data_to_be_sent[offset], to_be_sent[target]*sizeof(double), MPI_BYTE, target, SEND_DATA,
 			    &data_to_be_recv[offset_r], to_be_recv[target]*sizeof(double), MPI_BYTE, target, SEND_DATA, COMM, MPI_STATUS_IGNORE );
 	      
 	      
@@ -145,6 +151,7 @@ int exchange_double ( myull *to_be_sent, myull *to_be_recv, double *data_to_be_s
 
   memcpy(data_to_be_recv + offset_recv_mine, data_to_be_sent + offset_mine, to_be_sent[Me]*sizeof(double));
   
+  return 0;
   
 }
 
@@ -202,7 +209,7 @@ int exchange_float ( myull *to_be_sent, myull *to_be_recv, float *data_to_be_sen
 	     #endif
 		
 	      
-	      MPI_Sendrecv( &data_to_be_sent[offset], to_be_sent[target]*sizeof(float), MPI_BYTE, target, SEND_DATA,
+	      MPI_Sendrecv_custom( &data_to_be_sent[offset], to_be_sent[target]*sizeof(float), MPI_BYTE, target, SEND_DATA,
 			    &data_to_be_recv[offset_r], to_be_recv[target]*sizeof(float), MPI_BYTE, target, SEND_DATA, COMM, MPI_STATUS_IGNORE );
 	      
 	      
@@ -225,11 +232,12 @@ int exchange_float ( myull *to_be_sent, myull *to_be_recv, float *data_to_be_sen
 
   memcpy(data_to_be_recv + offset_recv_mine, data_to_be_sent + offset_mine, to_be_sent[Me]*sizeof(float));
   
-  
+  return 0;
 }
 
-void io_read(int rank, char *filename, char *datapath, MPI_File File, char *rfiles, char *data, MPI_Offset offset, unsigned long long Ndata)
+void io_read(int rank, char *filename, char *datapath, MPI_File File, char *rfiles, char *data, MPI_Offset offset, myull Ndata)
 {
+  
   strcpy(filename, datapath);
   strcat(filename, rfiles);
 
@@ -242,11 +250,23 @@ void io_read(int rank, char *filename, char *datapath, MPI_File File, char *rfil
 	fprintf(stderr, "Error: Could not open file '%s' for reading.\n", filename);
     }
 
-  MPI_File_read_at(File, offset, data, Ndata, MPI_BYTE, MPI_STATUS_IGNORE);
-      
-  MPI_File_close(&File);
-      
+    ierr = MPI_File_read_at_custom(File, offset, data, Ndata, MPI_BYTE, MPI_STATUS_IGNORE);
   
+  if (ierr != MPI_SUCCESS)
+    {
+      if (rank == 0)
+	fprintf(stderr, "Error %d in reading file\n", ierr);
+    }
+
+  
+  ierr = MPI_File_close(&File);
+      
+  if (ierr != MPI_SUCCESS)
+    {
+      if (rank == 0)
+	fprintf(stderr, "Error %d in closing file\n", ierr);
+    }
+
 
   MPI_Barrier(MPI_COMM_WORLD);
 }
@@ -367,6 +387,8 @@ void write_timings(int rank, timing_t timing)
       printf("%40s time: %g sec\n", "Phase correction", time_phase);
       printf("%40s time: %g sec\n", "Total", time_total);
     }
+
+  return;
 }
 
 
@@ -465,7 +487,34 @@ int main(int argc, char **argv)
 #else
   num_threads = 1;
 #endif //_OPENMP
+  
+ #if defined(OMP_ACCELERATION)
 
+  int gpu_working = 0;
+
+  /* Distinguish between NVIDIA and AMD platforms (Setonix is an example) */
+ #if defined(NVIDIA)
+  devID = rank % omp_get_num_devices();
+ #elif defined(AMD)
+  //devID = 0;
+  int num_devices = omp_get_num_devices();
+
+  /* This is necessary at least for Setonix */
+  if (num_devices > 1)
+    devID = rank % num_devices;
+  else
+    devID = 0;
+ #endif //NVIDIA OR AMD
+
+  //printf("AMD devices: %d\n", omp_get_num_devices());
+  
+ #pragma omp target map(from: gpu_working) device(devID)
+  {
+    gpu_working = (omp_is_initial_device() ? 0 : 1);
+  } 
+ #endif //OMP_ACCELERATION
+  
+  
   if (rank == 0)
   {
     printf("\n");
@@ -478,7 +527,33 @@ int main(int argc, char **argv)
     printf("Radio Imaging Code Kernels Library (v2.0.0)\n");
     printf("\n");
 
+     printf("\033[1;31m"); // colore rosso
+    printf("\n");
+    printf("FFFFF  OOOO  RRRR   ZZZZZ  AAAAA\n");
+    printf("F     O   O  R   R     Z   A   A\n");
+    printf("FFF   O   O  RRRR    Z     AAAAA\n");
+    printf("F     O   O  R R    Z      A   A\n");
+    printf("F      OOOO  R  R   ZZZZZ  A   A\n");
+    printf("\n");
+    printf("FFFFF  EEEEE  RRRR   RRRR   AAAAA  RRRR   IIIIII\n");
+    printf("F      E      R   R  R   R  A   A  R   R     I   \n");
+    printf("FFFFF  EEEEE  RRRR   RRRR   AAAAA  RRRR      I   \n");
+    printf("F      E      R R    R R    A   A  R R       I   \n");
+    printf("F      EEEEE  R  R   R  R   A   A  R  R   IIIIII\n");
+    printf("\033[0m"); // reset colore
+    printf("\n");
+    
     printf("Running with %d MPI tasks\n", size);
+    
+   #if defined(OMP_ACCELERATION)
+    if (gpu_working)
+      printf("GPU is working \n");
+    else
+      {
+	printf("No accelerators are available\n");
+	return -1;
+      }
+   #endif //OMP_ACCELERATION
   }
 #else
   rank = 0;
@@ -510,6 +585,7 @@ int main(int argc, char **argv)
   if (rank == 0)
     printf("DD computed and collected\n");
 
+ #ifdef DEBUG
   if (rank == 0)
     {
       for (int r = 0; r < size; r++)
@@ -520,19 +596,26 @@ int main(int argc, char **argv)
 	  int dy = decomp_table[r].size_y;
 	  int id = decomp_table[r].tile_id;
 	  
-	 #ifdef DEBUG
+
 	  printf("Rank %d sees: task %d (%d) → start=(%d,%d), end=(%d,%d), size=(%d × %d )\n", rank, r, id,  sx, sy, sx+dx-1, sy+dy -1, dx, dy);
-	 #endif
+
 	}
     }
-
+ #endif
   
   
   int ndatasets = 1;
   //strcpy(datapath_multi[0], "/beegfs/glacopo/IMAGING/ZW2_IFRQ_0444.binMS/");
   //strcpy(datapath_multi[0], "/data/ZW2_IFRQ_0444.binMS/");
-  //strcpy(datapath_multi[0], "/home/giovanni/RICK_LIBRARY/RICK/data/newgauss2noconj_t201806301100_SBL180.binMS/");
-  strcpy(datapath_multi[0], "/u/glacopo/RICK_PMT/newgauss2noconj_t201806301100_SBL180.binMS/");
+  //strcpy(datapath_multi[0], "/scratch/pawsey1026/glacopo/ASKAP_DATA/binMS/scienceData.EMU_1326-32.SB73478.EMU_1326-32.beam26_averaged_cal.leakage.binMS/");
+  //strcpy(datapath_multi[0], "/scratch/pawsey1026/glacopo/ASKAP_DATA_OLD/binMS/scienceData.EMU_0940+00A.SB74401.EMU_0940+00A.beam18_averaged_cal.leakage.binMS/");
+  strcpy(datapath_multi[0], "/scratch/pawsey1026/glacopo/ASKAP_DATA/binMS/scienceData.EMU_1326-32.SB73478.EMU_1326-32.beam13_averaged_cal.leakage.binMS/");
+  //strcpy(datapath_multi[0], "/scratch/pawsey1026/glacopo/tail01_L720378_SB001_uv_12DFF03B0t_121MHz_12DFF03BFt_143MHz_120ch_flag.binMS/");
+  //strcpy(datapath_multi[0], "/software/projects/pawsey1026/glacopo/hpc_imaging/data/newgauss2noconj_t201806301100_SBL180.binMS/");
+  //strcpy(datapath_multi[0], "/scratch/pawsey1026/glacopo/ZW2_IFRQ_0444.binMS/");
+  //strcpy(datapath_multi[0], "/scratch/pawsey1026/glacopo/SKA_DC/ZW2_IFRQ_0063.binMS/");
+  //strcpy(datapath_multi[0], "/leonardo/pub/userexternal/ederubei/datasets/tail01_L720378_SB001_uv_12DFF03B0t_121MHz_12DFF03BFt_143MHz_120ch_flag.binMS/");
+  //strcpy(datapath_multi[0], "/u/glacopo/RICK_PMT/newgauss2noconj_t201806301100_SBL180.binMS/");
 
   char metaname[1000];
   
@@ -556,7 +639,8 @@ int main(int argc, char **argv)
   fclose(pFile);
 
   Nvis = Nmeasures * freq_per_chan * polarisations;
-  Nweights = Nmeasures * freq_per_chan * polarisations;
+  //Nweights = Nmeasures * freq_per_chan * polarisations;
+  Nweights = Nmeasures * polarisations;
 
   myull nm_pe    = Nmeasures / size;
   myull rem      = Nmeasures % size;
@@ -565,7 +649,12 @@ int main(int argc, char **argv)
   
   Nmeasures = nm_pe;
   Nvis = Nmeasures * freq_per_chan * polarisations;
-  Nweights = Nmeasures * freq_per_chan * polarisations;
+  //Nweights = Nmeasures * freq_per_chan * polarisations;
+  Nweights = Nmeasures * polarisations;
+
+  //myull startrow_w = startrow * freq_per_chan * polarisations;
+  myull startrow_w = startrow * polarisations;
+  myull startrow_v = startrow * freq_per_chan * polarisations;
 
   if (rank == 0)
   {
@@ -576,7 +665,7 @@ int main(int argc, char **argv)
   double *vvt = (double*)malloc(Nmeasures*sizeof(double));
     
   /* DEFINE THE TIMINGS STRUCTURE */
-  timing_t timing;
+  timing_t timing = {0};
 
   if (rank == 0)
     printf("READING DATA WITH MPI-I/O AND DISTRIBUTING WITH POINT-TO-POINT COMMUNICATION\n");
@@ -762,39 +851,63 @@ int main(int argc, char **argv)
 
   start_read = WALLCLOCK_TIME;
 
-  io_read(rank, filename, datapath, pFile1, rfiles[3], (char*)weightst, sizeof(float) * startrow * freq_per_chan * polarisations, Nweights * sizeof(float));
+  io_read(rank, filename, datapath, pFile1, rfiles[3], (char*)weightst, sizeof(float) * startrow_w, Nweights * sizeof(float));
+  //io_read(rank, filename, datapath, pFile1, rfiles[3], (char*)weightst, sizeof(float) * startrow, Nmeasures * sizeof(float));
 
   timing.IO += WALLCLOCK_TIME - start_read;
 
-  /* Define new arrays for Npts and Npts_recv */
-  myull *vis_Npts      = (myull*)malloc(size*sizeof(myull));
-  myull *vis_Npts_recv = (myull*)malloc(size*sizeof(myull));
+  
+  /*
+  printf("Nweights: %llu, startrow_w: %llu\n", Nweights, startrow_w);
+  for (int ii=0; ii<Nweights; ii++)
+    if (weightst[ii] > 1e10)
+      printf("index: [%d] --> %g\n", ii, weightst[ii]);
+  */
+  
 
+  /* Define new arrays for Npts and Npts_recv for visibilities and weights */
+  myull *vis_Npts           = (myull*)malloc(size*sizeof(myull));
+  myull *vis_Npts_recv      = (myull*)malloc(size*sizeof(myull));
+  myull *weights_Npts       = (myull*)malloc(size*sizeof(myull));
+  myull *weights_Npts_recv  = (myull*)malloc(size*sizeof(myull));
+
+  
   for (int r=0; r<size; r++)
     {
-      vis_Npts[r]      = Npts[r] * freq_per_chan * polarisations;
-      vis_Npts_recv[r] = Npts_recv[r] * freq_per_chan * polarisations;
+      vis_Npts[r]          = Npts[r] * freq_per_chan * polarisations;
+      vis_Npts_recv[r]     = Npts_recv[r] * freq_per_chan * polarisations;
+      weights_Npts[r]      = Npts[r] * polarisations;
+      weights_Npts_recv[r] = Npts_recv[r] * polarisations;
+      
     }
   
   /* Allocate a new buffer for weights */
-  float *buffer_weights = (float*)malloc(offset_bs*freq_per_chan*polarisations*sizeof(float));
+  float *buffer_weights = (float*)calloc(offset_bs*polarisations,sizeof(float));
 
   start_bucket = WALLCLOCK_TIME;
-  
+
+  /*
   for (myull kk=0; kk<offset_bs; kk++)
     for (myull ww=0; ww<(freq_per_chan * polarisations); ww++)
       buffer_weights[kk * freq_per_chan * polarisations + ww] = weightst[bucket_sort[kk] * freq_per_chan * polarisations + ww];
-    
+  */
 
+  
+  for (myull kk=0; kk<offset_bs; kk++)
+    for (myull ww=0; ww<polarisations; ww++)
+      buffer_weights[kk * polarisations + ww] = weightst[bucket_sort[kk] * polarisations + ww];
+  
   timing.bucket += WALLCLOCK_TIME - start_bucket;
   
   free(weightst);
   
-  float *weights = (float*)malloc(total_size * freq_per_chan * polarisations * sizeof(float));
+  //float *weights = (float*)calloc(total_size * freq_per_chan * polarisations,sizeof(float));
+  float *weights = (float*)calloc(total_size * polarisations,sizeof(float));
 
   start_comm = WALLCLOCK_TIME;
-  
-  exchange_float(vis_Npts, vis_Npts_recv, buffer_weights, weights, rank, size, MPI_COMM_WORLD);
+
+  //exchange_float(vis_Npts, vis_Npts_recv, buffer_weights, weights, rank, size, MPI_COMM_WORLD);
+  exchange_float(weights_Npts, weights_Npts_recv, buffer_weights, weights, rank, size, MPI_COMM_WORLD);
 
   timing.communication += WALLCLOCK_TIME - start_comm;
   
@@ -806,10 +919,10 @@ int main(int argc, char **argv)
     
   start_read = WALLCLOCK_TIME;
 
-  io_read(rank, filename, datapath, pFile1, rfiles[4], (char*)vis_realt, sizeof(float) * startrow * freq_per_chan * polarisations, Nvis * sizeof(float));
-
+  io_read(rank, filename, datapath, pFile1, rfiles[4], (char*)vis_realt, sizeof(float) * startrow_v, Nvis * sizeof(float));
+    
   timing.IO += WALLCLOCK_TIME - start_read;
-
+  
   /* Allocate a new buffer for visibility data */
   float *buffer_vis = (float*)malloc(offset_bs*freq_per_chan*polarisations*sizeof(float));
 
@@ -839,7 +952,7 @@ int main(int argc, char **argv)
 
   start_read = WALLCLOCK_TIME;
 
-  io_read(rank, filename, datapath, pFile1, rfiles[5], (char*)vis_imgt, sizeof(float) * startrow * freq_per_chan * polarisations, Nvis * sizeof(float));
+  io_read(rank, filename, datapath, pFile1, rfiles[5], (char*)vis_imgt, sizeof(float) * startrow_v, Nvis * sizeof(float));
 
   timing.IO += WALLCLOCK_TIME - start_read;
 
@@ -862,7 +975,9 @@ int main(int argc, char **argv)
   timing.communication += WALLCLOCK_TIME - start_comm;
   
   free(buffer_vis);
-  
+
+  free(weights_Npts_recv);
+  free(weights_Npts);
   free(vis_Npts_recv);
   free(vis_Npts);
   free(bucket_sort);
@@ -870,16 +985,42 @@ int main(int argc, char **argv)
   free(Npts);
   free(min);
   free(max);
-  
-  myull size_of_grid = 2 * num_w_planes * xaxis * yaxis;
-  //printf("Task %d, my size = %llu\n", rank, size_of_grid);
-  
-  
-  double *grid;
-  grid = (double *)calloc(size_of_grid, sizeof(double));
-  //double *gridss;
-  //gridss = (double *)calloc(size_of_grid, sizeof(double));
 
+  myull size_of_grid = 2 * num_w_planes * xaxis * yaxis;
+
+  double *grid;
+  grid = (double *)calloc(size_of_grid,sizeof(double));
+
+ #if defined(OMP_ACCELERATION)
+  //#pragma omp declare target(grid)
+  /* Allocate the memory on the device */
+
+  omp_set_default_device(devID);
+
+  myull Nviss     = freq_per_chan*total_size;
+   
+  //#pragma omp target enter data map(alloc: uu[0:total_size], vv[0:total_size], ww[0:total_size]) device(devID) 
+
+  //#pragma omp target enter data map(alloc: weights[0:Nviss], vis_real[0:Nviss], vis_img[0:Nviss]) device(devID)
+
+#pragma omp target enter data map(to: grid[0:size_of_grid]) //device(devID)
+  
+  /* Check that all the pointers are correctly present on the device */
+  
+  if (!omp_target_is_present(grid, devID))
+    {
+      printf("Rank %d! ERROR: Memory for 'grid' is not present on the device\n", rank);
+      return -2;
+    }
+
+  MPI_Barrier(MPI_COMM_WORLD);
+  
+  if (rank == 0)
+    printf("Memory for data and grid has been successfully allocated on the device!\n");
+  
+ #endif //OMP_ACCELERATION
+  
+  
   double *image_real = (double *)calloc(xaxis * yaxis, sizeof(double));
   double *image_imag = (double *)calloc(xaxis * yaxis, sizeof(double));
 
@@ -916,6 +1057,7 @@ int main(int argc, char **argv)
 
   timing.gridding += WALLCLOCK_TIME - gridding_start;
 
+  
   free(ww);
   free(vv);
   free(uu);
@@ -967,6 +1109,11 @@ int main(int argc, char **argv)
 
   free(image_imag);
   free(image_real);
+
+#if defined(OMP_ACCELERATION)
+#pragma omp target exit data map(delete: grid[0:size_of_grid]) //device(devID) 
+#endif //defined OMP_ACCELERATION
+
   free(grid);
   
   if (rank == 0)

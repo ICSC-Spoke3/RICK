@@ -1,5 +1,6 @@
 #include <mpi.h>
 #include <time.h>
+#include <limits.h>
 
 #ifdef _OPENMP
 #define HYBRID_FFTW
@@ -7,6 +8,15 @@
 
 typedef unsigned int       myuint;
 typedef unsigned long long myull;
+
+int MPI_File_read_at_custom(MPI_File, MPI_Offset, void *,
+			    myull, MPI_Datatype,
+			    MPI_Status *);
+
+int MPI_Sendrecv_custom(void *, myull, MPI_Datatype,
+			int, int, void *, myull,
+			MPI_Datatype, int, int,
+			MPI_Comm, MPI_Status *);
 
 void gridding(
     int,
@@ -94,3 +104,28 @@ extern timing_t timing;      // wall-clock process timing
 
 #define MPI_COUNT_T MPI_UNSIGNED_LONG_LONG
 #define SIGMA_FACTOR_Y 6.0
+
+/* If nothing is defined, the HeFFTe will go for FFTW backend */
+
+#if defined(NVIDIA) /////
+#define BACKEND Heffte_BACKEND_CUFFT
+#elif defined(AMD)
+#define BACKEND Heffte_BACKEND_ROCFFT
+#elif defined(INTEL)
+#define BACKEND Heffte_BACKEND_MKL
+#else
+#define BACKEND Heffte_BACKEND_FFTW
+#endif /////
+
+/* If NVIDIA or AMD or INTEL are defined, switch on OpenMP acceleration */
+
+#if defined(NVIDIA) || defined(AMD) || defined(INTEL)
+#define OMP_ACCELERATION
+#endif //NVIDIA OR AMD OR INTEL
+
+extern double* grid;
+
+#if defined(OMP_ACCELERATION)
+extern int devID;
+#pragma omp declare target(grid)
+#endif //OMP_ACCELERATION

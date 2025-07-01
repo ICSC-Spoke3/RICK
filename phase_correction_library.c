@@ -218,7 +218,12 @@ void phase_correction(
   }
   */
 
+ #if defined(OMP_ACCELERATION)
+  omp_set_default_device(devID);
+#pragma omp target teams distribute parallel for collapse(2) private(wterm) map(tofrom : image_real[0 : xaxis * yaxis], image_imag[0 : xaxis * yaxis]) //device(devID)
+ #else
  #pragma omp parallel for collapse(2) private(wterm)
+ #endif //OMP_ACCELERATION
   for (int iw = 0; iw < num_w_planes; iw++)
   {
     for (int iv = 0; iv < yaxis; iv++)

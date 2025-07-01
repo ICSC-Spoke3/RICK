@@ -1,0 +1,52 @@
+HEFFTE = /software/projects/pawsey1026/glacopo/newnew_heffte/heffte/local_new
+#HEFFTE = /software/projects/pawsey1026/glacopo/heffte/local_amd
+#HEFFTE = /software/projects/pawsey1026/glacopo/new_heffte/heffte/local_amd_cpu
+#HEFFTE = /software/projects/pawsey1026/glacopo/HEFFTE_INSTALL_2
+
+INC   =  -I$(HEFFTE)/include
+
+LIB   =  -L$(HEFFTE)/lib64 -lheffte -lm
+
+EXEC = rick_gpu
+#EXEC = rick_cpu_amd
+
+#CC   = cc
+CC   = mpicc
+
+OPT += -DGAUSS
+#OPT += -DKAISERBESSEL
+OPT += -DUSE_MPI
+OPT += -DPHASE_ON
+OPT += -DSTOKESI
+#OPT += -DWEIGHTING_UNIFORM
+#OPT += -DWEIGHTING_BRIGGS
+OPT += -DAMD
+#OPT  += -DNVIDIA
+#OPT += -DWRITE_DATA
+#OPT += -DDEBUG4
+#OPT += -DFFT_PROFILE
+#OPT += -DFITSIO
+
+#FLAGS   = -O3 -mp=gpu -target=gpu -gpu=ccnative -march=native -mavx -mavx2
+#FLAGS   = -O3 -mtune=native -fopenmp -g 
+FLAGS   = -O3 -mtune=native -fopenmp --offload-arch=gfx90a -g 
+#FLAGS   = -O3 -mtune=native -g -v
+#FLAGS   = -O0 -g -v
+#FLAGS   = -O3 -fopenmp --offload-arch=native -fopenmp-targets=nvptx64-nvidia-cuda --cuda-path=/data/Linux_x86_64/25.1/cuda/12.6 -g
+
+# Source files #
+
+OBJECTS = test_clib.o gridding_library.o fft_library.o phase_correction_library.o mpi_functions_redefined.o
+
+DEPS = ricklib.h
+
+%.o: %.c $(DEPS)
+	$(CC) $(FLAGS) $(OPT) $(INC) -c -o $@ $< 
+
+w-stacking: $(OBJECTS) $(DEPS) Makefile
+	$(CC) $(FLAGS) $(OPT) $(INC) $(OBJECTS) -o $(EXEC) $(LIB) 
+.PHONY:
+	clean		
+
+clean:
+	rm *.o $(EXEC)

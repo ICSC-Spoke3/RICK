@@ -149,17 +149,29 @@ void stokes(
 #if defined(STOKESI)
   visreal_stokes = (float *)malloc(Nmeasures * freq_per_chan * sizeof(float));
   visimg_stokes  = (float *)malloc(Nmeasures * freq_per_chan * sizeof(float));
-  weights_stokes = (float *)malloc(Nmeasures * freq_per_chan * sizeof(float));
+  weights_stokes = (float *)malloc(Nmeasures * sizeof(float));
   for (myull i = 0; i < (Nmeasures * freq_per_chan); i++)
   {
     visreal_stokes[i] = 0.5 * (visreal[i * 4] + visreal[(i * 4) + 3]);
     visimg_stokes[i] = 0.5 * (visimg[i * 4] + visimg[(i * 4) + 3]);
+
+    /*
     weights_stokes[i] = 0.25 * (weights[i * 4] + weights[(i * 4) + 3]);
 #if !defined(WEIGHTING_UNIFORM) || !defined(WEIGHTING_BRIGGS)
     weights_stokes_sum += weights_stokes[i];
 #endif
+    */
   }
-  // printf("Sum weights Stokes I %f\n", weights_stokes_sum);
+
+  for (myull j=0; j<Nmeasures; j++)
+      {
+	weights_stokes[j] = 0.25 * (weights[j * 4] + weights[(j * 4) + 3]);
+       #if !defined(WEIGHTING_UNIFORM) || !defined(WEIGHTING_BRIGGS)
+	weights_stokes_sum += weights_stokes[j];
+       #endif
+      }
+ 
+  //printf("Sum weights Stokes I %f\n", weights_stokes_sum);
 #elif defined(STOKESQ)
   visreal_stokes = (float *)malloc(Nmeasures * freq_per_chan * sizeof(float));
   visimg_stokes = (float *)malloc(Nmeasures * freq_per_chan * sizeof(float));
@@ -326,6 +338,7 @@ void wstack(
   omp_set_num_threads(num_threads);
 #endif
 
+  /*
 #if defined(ACCOMP) && (GPU_STACKING)
   omp_set_default_device(rank % omp_get_num_devices());
   myull Nvis = num_points * freq_per_chan;
@@ -334,6 +347,7 @@ void wstack(
 #else
 #pragma omp parallel for private(visindex)
 #endif
+  */
 
 #if defined(WEIGHTING_BRIGGS)
   float robust = 2.0;
@@ -398,7 +412,16 @@ void wstack(
 #endif
 
   myuint y_end = y_start + yaxis - 1;
+
+  myull iKer = 0;
+  myuint k, j = 0;
   
+ #if defined(OMP_ACCELERATION)
+  //#pragma omp target parallel for private(visindex) map(to: convkernel[0:increaseprecision*w_support]) device(devID)
+  omp_set_default_device(devID);
+  //#pragma omp target enter data map(to: grid[0:2*num_w_planes*grid_size_x*yaxis]) //device(devID)
+ #pragma omp target teams distribute parallel for private(visindex) map(to: convkernel[0:increaseprecision*w_support])  //device(devID)
+ #endif //OMP_ACCELERATION
   for (i = 0; i < num_points; i++)
   {
 #ifdef _OPENMP
@@ -407,15 +430,17 @@ void wstack(
     // printf("%d\n",tid);
 #endif
 
+    if (ww[i] == 1)
+      continue;
+    
     visindex = i * freq_per_chan;
 
-    double sum = 0.0;
-    myuint j, k;
+    //myuint j, k;
 
     /* Convert UV coordinates to grid coordinates. */
     double pos_u = uu[i] / dx;
     double pos_v = vv[i] / dx;
-    double ww_i = ww[i] / dw;
+    double ww_i  = ww[i] / dw;
 
     int grid_w = (int)ww_i;
     int grid_u = (int)pos_u;
@@ -455,7 +480,7 @@ void wstack(
       for (j = jmin; j <= jmax; j++)
       {
         double u_dist = (double)j + 0.5 - pos_u;
-        myull iKer = 2 * (j + (k-y_start) * grid_size_x + grid_w * grid_size_x * yaxis);
+        iKer = 2 * (j + (k-y_start) * grid_size_x + grid_w * grid_size_x * yaxis);
         int jKer = (int)(increaseprecision * (fabs(u_dist + (double)KernelLen)));
 	
 #if defined(WEIGHTING_UNIFORM)
@@ -496,35 +521,43 @@ void wstack(
         // DAV: the following two loops are performend by each thread separately: no problems of race conditions
         for (int ifreq = 0; ifreq < freq_per_chan; ifreq++)
         {
-          // int iweight = visindex / freq_per_chan;
+          myull iweight = visindex / freq_per_chan;
           // for (int ipol = 0; ipol < polarizations; ipol++)
           //{
           if (!isnan(vis_real[ifine]))
           {
 #if defined(WEIGHTING_UNIFORM) || defined(WEIGHTING_BRIGGS)
-            add_term_real += out_weight_uniform[ifine] * vis_real[ifine] * conv_weight;
-            add_term_img += out_weight_uniform[ifine] * vis_img[ifine] * conv_weight;
+            add_term_real += out_weight_uniform[iweight] * vis_real[ifine] * conv_weight;
+            add_term_img  += out_weight_uniform[iweight] * vis_img[ifine] * conv_weight;
 #else
-            add_term_real += weight[ifine] * vis_real[ifine] * conv_weight;
-            add_term_img += weight[ifine] * vis_img[ifine] * conv_weight;
+            add_term_real += weight[iweight] * vis_real[ifine] * conv_weight;
+            add_term_img  += weight[iweight] * vis_img[ifine] * conv_weight;
 #endif
           }
           ifine++;
-          // iweight++;
+	  iweight++;
           //}
         }
         // DAV: this is the critical call in terms of correctness of the results and of performance
-#pragma omp atomic
+       #pragma omp atomic
         grid[iKer] += add_term_real;
-#pragma omp atomic
+       #pragma omp atomic
         grid[iKer + 1] += add_term_img;
       }
     }
   }
+ 
+ #if defined(OMP_ACCELERATION)
+  /* Clean the GPU memory */
+  //#pragma omp target exit data map(delete: uu, vv, ww, weight, vis_real, vis_img, convkernel) device(devID)
+ #pragma omp target exit data map(delete: convkernel[0:increaseprecision*w_support]) //device(devID)
+ #endif //OMP_ACCELERATION
+  
+  /*
 #if defined(ACCOMP) && (GPU_STACKING)
 #pragma omp target exit data map(delete : uu[0 : num_points], vv[0 : num_points], ww[0 : num_points], vis_real[0 : Nvis], vis_img[0 : Nvis], weight[0 : Nvis / freq_per_chan], grid[0 : 2 * num_w_planes * grid_size_x * grid_size_y])
 #endif
-
+  */
 #if defined(WEIGHTING_UNIFORM)
   free(weight_uv);
   free(out_weight_uniform);
@@ -582,7 +615,23 @@ void gridding_data(
     myull total_size,
     int grid_size_y)
 {
+  
+ #if defined(OMP_ACCELERATION)
+  //#pragma omp declare target(uu, vv, ww, weights, visreal, visimg)
+  myull Nvis = freq_per_chan*total_size;
+  omp_set_default_device(devID);
+  /* Load uu,vv,ww on the accelerator */
+  //#pragma omp target update to(uu[0:total_size], vv[0:total_size], ww[0:total_size]) //device(devID) //nowait
+ #pragma omp target enter data map(to: uu[0:total_size], vv[0:total_size], ww[0:total_size]) nowait //device(devID) nowait
+  /* Load weights, vis_real and vis_img non-blockingly since we need them later */
+ #pragma omp target enter data map(to: weights[0:total_size], visreal[0:Nvis], visimg[0:Nvis]) nowait //device(devID) nowait
+ 
+  /* This mapping holds for both STOKES and non-STOKES cases, since in both cases at the end polarisations is 1 */
 
+  //#pragma omp target enter data map(alloc: grid[0:size_of_grid]) //device(devID)
+  
+ #endif //OMP_ACCELERATION
+  
   double shift = (double)(dx * yaxis);
 
   // calculate the resolution in radians
@@ -598,6 +647,7 @@ void gridding_data(
   double uumax = -1e20;
   double vvmax = -1e20;
 
+  
  #pragma omp parallel reduction(min : uumin, vvmin) reduction(max : uumax, vvmax) num_threads(num_threads)
   {
     double my_uumin = 1e20;
@@ -621,6 +671,11 @@ void gridding_data(
   }
     
 
+  /* Wait for data to be loaded on GPUs */
+ #if defined(OMP_ACCELERATION)
+ #pragma omp taskwait 
+ #endif //OMP_ACCELERATION
+  
   // Make convolution on the grid
 
 
@@ -648,6 +703,12 @@ void gridding_data(
 	 grid_size_y);
 
 
+#if defined(OMP_ACCELERATION)
+#pragma omp target exit data map(delete: uu[0:total_size], vv[0:total_size], ww[0:total_size], weights[0:total_size]) 
+  /* Load weights, vis_real and vis_img non-blockingly since we need them later */
+#pragma omp target exit data map(delete: visreal[0:Nvis], visimg[0:Nvis]) 
+#endif // defined (OMP_ACCELERATION)
+  
   /* Wait until all MPI tasks perform the gridding */
   MPI_Barrier(MYMYMPI_COMM);
 
@@ -658,6 +719,10 @@ void gridding_data(
       printf("WRITING GRIDDED DATA\n");
     }
 
+ #if defined(OMP_ACCELERATION)
+ #pragma omp target update from(grid[0:size_of_grid]) //device(devID)
+ #endif //OMP_ACCELERATION
+  
   MPI_File pFilereal;
   MPI_File pFileimg;
 
@@ -792,6 +857,7 @@ void gridding(
   double dw = 1.0 / (double)num_w_planes;
   double w_supporth = (double)((w_support - 1) / 2) * dx;
 
+  
  #if defined(STOKESI) || defined(STOKESQ) || defined(STOKESU)
   // Collapse correlations into Stokes parameters
   stokes(
@@ -800,8 +866,8 @@ void gridding(
       visreal,
       visimg,
       weights);
- #endif
-
+ #endif //STOKESI OR STOKESQ OR STOKESU
+  
   // Sector and Gridding data
   gridding_data(
       dx,

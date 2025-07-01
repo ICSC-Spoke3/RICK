@@ -7,28 +7,16 @@ RICK is written in C/C++ and can perform the following routines:
 - Fast Fourier Transform (FFT)
 - w-correction
 
-It exploits the Message Passing Interface (MPI) and OpenMP for parallelism, and is able to run on both NVIDIA and AMD GPUs using CUDA, HIP, and OpenMP for GPU offloading.
+It exploits the Message Passing Interface (MPI) and OpenMP for parallelism, and is able to run on both NVIDIA and AMD GPUs using OpenMP for GPU offloading.
 
 ## How to use RICK library
 
-RICK library is made for creating shared libraries to be called within any radio interferometric imaging software or, more simply, within a Python script. <br>
+RICK library is also made for creating shared libraries to be called within any radio interferometric imaging software. <br>
 RICKlib requires the following softwares:
 - MPI
-- fftw3
+- HeFFTe (please install it with the correct support (FFTW3, CUFFT, ROCFFT))
 
-### In Python:
-To compile the individual libraries use the following commands:
-```
-> mpicc -L/path/to/mpi/lib/ -I/path/to/mpi/include/ -shared -o gridding.so -fPIC gridding_library.c
-> mpicc -L/path/to/mpi/lib/ -L/path/to/fftw3/lib/  -I/path/to/mpi/include/ -I/path/to/fftw3/include/ -shared -o fft.so -fPIC fft_library.c
-> mpicc -L/path/to/mpi/lib/ -I/path/to/mpi/include/ -shared -o phasecorr.so -fPIC phase_correction_library.c
-```
-These commands should create dynamic libraries with extension `.so` in your working directory.<br>
-
-After this, you can run the Python script `lib_test.py` specifying the directory of the measurement set and the parameters for the image (size, w-planes, etc.)
-```
-> python3 lib_test.py
-```
+On Setonix: do NOT compile the code with Cray clang, please use amdclang available under rocm/6.3.2 module.
 
 Please install HeFFTe on your machine
 
@@ -38,13 +26,20 @@ Please install HeFFTe on your machine
 > make
 ```
 
-To run the library
+To run the code (SETONIX)
 ```
-> mpirun -np N rick
+> srun -l -u -N --ntasks-per-node= -c 8 --gpus-per-task=1 ./rick_gpu
 ```
+
+To run the code (LEONARDO) (Temporarily, we're gonna switch to srun again)
+```
+> mpirun -n ./rick_gpu
+```
+
+Without the -DAMD or -DNVIDIA options active, the code is going to be compiled for the host
 
 <br>
 
 ## Contacts
 
-For feedbacks, suggestions, and requests [contact us](mailto:emanuele.derubeis2@unibo.it)!: emanuele.derubeis2@unibo.it
+For feedbacks, suggestions, and requests [contact us](mailto:emanuele.derubeis2@unibo.it, giovanni.lacopo@inaf.it)!: emanuele.derubeis2@unibo.it, giovanni.lacopo@inaf.it

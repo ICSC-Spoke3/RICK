@@ -9,7 +9,7 @@
 #include "ricklib.h"
 #include <omp.h>
 
-#define BACKEND Heffte_BACKEND_FFTW
+
 
 struct my_double_complex
 {
@@ -37,9 +37,15 @@ void fftw_data(
 
   
   // FFT transform the data (using distributed FFTW)
+ 
   if (rank == 0)
   {
-    printf("RICK FFT\n");
+   #if defined(OMP_ACCELERATION)
+    printf("HEFFTE RUNNING ON ACCELERATORS\n");
+    omp_set_default_device(devID);
+   #else
+    printf("HEFFTE RUNNING ON HOST\n");
+   #endif //OMP_ACCELERATION
   }
 
   // double start = CPU_TIME_wt;
@@ -58,12 +64,13 @@ void fftw_data(
 
   // Use the hybrid MPI-OpenMP FFTW
 
+  /*
 #ifdef HYBRID_FFTW
   fftw_plan_with_nthreads(num_threads);
   if (rank == 0)
     std::cout << "Using " << num_threads << " threads for the FFT" << std::endl;
 #endif
-
+  */
   // map the 1D array of complex visibilities to a 2D array required by FFTW (complex[*][2])
   // x is the direction of contiguous data and maps to the second parameter
   // y is the parallelized direction and corresponds to the first parameter (--> n0)
@@ -73,6 +80,15 @@ void fftw_data(
   int heffte_err;
   heffte_err = heffte_set_default_options(BACKEND, &fft_options);
 
+ #if defined(OMP_ACCELERATION)
+  /* TURN ON GPU DIRECT */
+  fft_options.use_gpu_aware = 0;
+ #endif //OMP_ACCELERATION
+  
+#if defined(FFT_PROFILE)
+  double plan_time = MPI_Wtime();
+#endif
+  
   if (heffte_err != Heffte_SUCCESS)  printf("Heffte error in default options %d\n", heffte_err);
 
   heffte_err = heffte_plan_create(
@@ -88,40 +104,84 @@ void fftw_data(
 
   if (heffte_err != Heffte_SUCCESS)  printf("Heffte error in plan creation %d\n", heffte_err);
 
+#if defined(FFT_PROFILE)
+  plan_time = MPI_Wtime() - plan_time;
+  double ftime_plan = 0.0;
+
+  MPI_Reduce(&plan_time, &ftime_plan, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+
+  if (rank == 0)
+    printf("FFT PLAN :%g seconds\n", ftime_plan);
+#endif
+
+
+  
+  
   myuint inbox_size  = heffte_size_inbox(plan);
     
   input  = (struct my_double_complex*)malloc(inbox_size*sizeof(struct my_double_complex));
+
+ #if defined(OMP_ACCELERATION)
+  /* Allocate 'input' on the accelerator */
+ #pragma omp target enter data map(alloc: input[0:inbox_size]) //device(devID)
+ #pragma omp target data use_device_ptr(grid) //device(devID)
+
+ #endif //OMP_ACCELERATION
+
   
-  for (int iw = 0; iw < num_w_planes; iw++)
-  {
-    //printf("FFTing plan %d\n",iw);
-    //  select the w-plane to transform
-
-#ifdef HYBRID_FFTW
-#pragma omp parallel for collapse(2) num_threads(num_threads) 
+#if defined(FFT_PROFILE)
+    double compute_time = MPI_Wtime();
 #endif
-    for (myuint i = 0; i < inbox_size; i++)
+
+    for (int iw = 0; iw < num_w_planes; iw++)
       {
-	input[i].real = grid[2*(i+iw*inbox_size)];
-	input[i].imag = grid[2*(i+iw*inbox_size)+1];
-      }
-    
-    // do the transform for each w-plane
-    heffte_backward_z2z(plan, input, input, Heffte_SCALE_NONE);
-    
-    // save the transformed w-plane
+	//printf("FFTing plan %d\n",iw);
+	//  select the w-plane to transform
 
-#ifdef HYBRID_FFTW
-#pragma omp parallel for collapse(2) num_threads(num_threads) 
+#if defined(OMP_ACCELERATION)
+#pragma omp target teams distribute parallel for //device(devID) 
+#endif //OMP_ACCELERATION
+	for (myuint i = 0; i < inbox_size; i++)
+	  {
+	    input[i].real = grid[2*(i+iw*inbox_size)];
+	    input[i].imag = grid[2*(i+iw*inbox_size)+1];
+	  }
+
+	// do the transform for each w-plane
+#if defined(OMP_ACCELERATION)
+#pragma omp target data use_device_ptr(input) //device(devID)
 #endif
-    for (myuint i = 0; i < inbox_size; i++)
-    {
-      grid[2*(i+iw*inbox_size)]   = input[i].real;
-      grid[2*(i+iw*inbox_size)+1] = input[i].imag;
-    }
-   
-  }
+	heffte_backward_z2z(plan, input, input, Heffte_SCALE_NONE);
 
+	// save the transformed w-plane
+
+#if defined(OMP_ACCELERATION)
+#pragma omp target teams distribute parallel for //device(devID)
+#endif //OMP_ACCELERATION
+	for (myuint i = 0; i < inbox_size; i++)
+	  {
+	    grid[2*(i+iw*inbox_size)]   = input[i].real;
+	    grid[2*(i+iw*inbox_size)+1] = input[i].imag;
+	  }
+   
+      }
+
+#if defined(FFT_PROFILE)
+  compute_time = MPI_Wtime() - compute_time;
+  double ftime_compute = 0.0;
+    
+  MPI_Reduce(&compute_time, &ftime_compute, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+  
+  if (rank == 0)
+    printf("FFT KERNELS :%g seconds\n", ftime_compute);
+#endif
+
+  
+ #if defined(OMP_ACCELERATION)
+  /* Free the accelerator's memory */
+ #pragma omp target exit data map(delete: input[0:inbox_size]) //device(devID)
+ #endif //OMP_ACCELERATION
+  
   heffte_plan_destroy(plan);
   free(input);
 
@@ -134,11 +194,16 @@ void fftw_data(
   {
     printf("WRITING FFT TRANSFORMED DATA\n");
   }
-  MPI_File pFilereal;
-  MPI_File pFileimg;
 
   myull size_of_grid = 2 * num_w_planes * xaxis * yaxis;
   
+ #if defined(OMP_ACCELERATION)
+ #pragma omp target update from(grid[0:size_of_grid]) //device(devID)
+ #endif //OMP_ACCELERATION
+ 
+  MPI_File pFilereal;
+  MPI_File pFileimg;
+
   double *gridss_real = (double *)malloc(size_of_grid / 2 * sizeof(double));
   double *gridss_img = (double *)malloc(size_of_grid / 2 * sizeof(double));
 
