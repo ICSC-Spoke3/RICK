@@ -4,13 +4,17 @@
 #define HYBRID_FFTW
 #endif
 
-#if !defined(RICK_GPU) && defined( HYBRID_FFTW )
+#if !defined(RICK_GPU) && defined(HYBRID_FFTW)
 #include <fftw3-mpi.h>
-#define FFT_INIT    { fftw_init_threads(); fftw_mpi_init();}
+#define FFT_INIT             \
+    {                        \
+        fftw_init_threads(); \
+        fftw_mpi_init();     \
+    }
 #define FFT_CLEANUP fftw_cleanup_threads()
 #elif !defined(RICK_GPU) && !defined(HYBRID_FFTW)
 #include <fftw3-mpi.h>
-#define FFT_INIT    fftw_mpi_init()
+#define FFT_INIT fftw_mpi_init()
 #define FFT_CLEANUP fftw_cleanup()
 #endif
 
@@ -35,13 +39,20 @@ void gridding(
     char *,
     char *,
 #endif
+#if defined(STOKESI) || defined(STOKESQ) || defined(STOKESU)
     float *,
     float *,
     float *,
+#else
+    float *,
+    float *,
+    float *,
+#endif
     double,
-    double);
+    double,
+    int);
 
-    void fftw_data(
+void fftw_data(
     int,
     int,
     int,
@@ -56,7 +67,7 @@ void gridding(
     double *,
     double *);
 
-    void phase_correction(
+void phase_correction(
     double *,
     double *,
     double *,
@@ -71,3 +82,13 @@ void gridding(
     int,
     int,
     MPI_Comm);
+
+void stokes_collapse(
+    unsigned int,
+    int,
+    float *,
+    float *,
+    float *,
+    float *,
+    float *,
+    float *);
