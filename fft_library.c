@@ -9,7 +9,9 @@
 #include "ricklib.h"
 #include <omp.h>
 
-
+#if defined(_OPENMP) && !defined(OMP_ACCELERATION)
+#include <fftw3-mpi.h>
+#endif
 
 struct my_double_complex
 {
@@ -58,19 +60,18 @@ void fftw_data(
 
   int inbox_low[3]  = {0, y_start, 0};
   int inbox_high[3] = {x_end, y_end, 0};
-  
-  
+
   // double norm = 1.0 / (double)(grid_size_x * grid_size_y);
 
   // Use the hybrid MPI-OpenMP FFTW
 
-  /*
-#ifdef HYBRID_FFTW
+  
+ #if defined(_OPENMP) && !defined(OMP_ACCELERATION) 
   fftw_plan_with_nthreads(num_threads);
   if (rank == 0)
-    std::cout << "Using " << num_threads << " threads for the FFT" << std::endl;
-#endif
-  */
+    printf("Using %d threads for the FFT\n", num_threads);
+ #endif // _OPENMP && !OMP_ACCELERATION
+  
   // map the 1D array of complex visibilities to a 2D array required by FFTW (complex[*][2])
   // x is the direction of contiguous data and maps to the second parameter
   // y is the parallelized direction and corresponds to the first parameter (--> n0)
@@ -117,7 +118,7 @@ void fftw_data(
 
   
   
-  myuint inbox_size  = heffte_size_inbox(plan);
+  myull inbox_size  = heffte_size_inbox(plan);
     
   input  = (struct my_double_complex*)malloc(inbox_size*sizeof(struct my_double_complex));
 
@@ -138,27 +139,31 @@ void fftw_data(
 	//printf("FFTing plan %d\n",iw);
 	//  select the w-plane to transform
 
-#if defined(OMP_ACCELERATION)
-#pragma omp target teams distribute parallel for //device(devID) 
-#endif //OMP_ACCELERATION
-	for (myuint i = 0; i < inbox_size; i++)
+       #if defined(OMP_ACCELERATION)
+       #pragma omp target teams distribute parallel for //device(devID) 
+       #else 
+       #pragma omp parallel for num_threads(num_threads)
+       #endif //OMP_ACCELERATION
+	for (myull i = 0; i < inbox_size; i++)
 	  {
 	    input[i].real = grid[2*(i+iw*inbox_size)];
 	    input[i].imag = grid[2*(i+iw*inbox_size)+1];
 	  }
 
 	// do the transform for each w-plane
-#if defined(OMP_ACCELERATION)
-#pragma omp target data use_device_ptr(input) //device(devID)
-#endif
+       #if defined(OMP_ACCELERATION)
+       #pragma omp target data use_device_ptr(input) //device(devID)
+       #endif
 	heffte_backward_z2z(plan, input, input, Heffte_SCALE_NONE);
 
 	// save the transformed w-plane
 
-#if defined(OMP_ACCELERATION)
-#pragma omp target teams distribute parallel for //device(devID)
-#endif //OMP_ACCELERATION
-	for (myuint i = 0; i < inbox_size; i++)
+       #if defined(OMP_ACCELERATION)
+       #pragma omp target teams distribute parallel for //device(devID)
+       #else 
+       #pragma omp parallel for num_threads(num_threads)
+       #endif //OMP_ACCELERATION
+	for (myull i = 0; i < inbox_size; i++)
 	  {
 	    grid[2*(i+iw*inbox_size)]   = input[i].real;
 	    grid[2*(i+iw*inbox_size)+1] = input[i].imag;

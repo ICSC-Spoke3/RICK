@@ -122,6 +122,8 @@ void phase_correction(
   if (rank == 0)
     printf("RICK PHASE CORRECTION\n");
 
+  double phase_0 = WALLCLOCK_TIME;
+  
   double dw = (wmax - wmin) / (double)num_w_planes;
   double wterm = wmin + 0.5 * dw;
   double dwnorm = dw / (wmax - wmin);
@@ -207,7 +209,7 @@ void phase_correction(
 #ifndef ACCOMP
 
 #ifdef _OPENMP
-  omp_set_num_threads(num_threads);
+  //omp_set_num_threads(num_threads);
 #endif
 
   // OMP debugging verification
@@ -217,12 +219,12 @@ void phase_correction(
     printf("Hello from thread %d out of %d of task %d\n", omp_get_thread_num(), omp_get_num_threads(), rank);
   }
   */
-
+  /*
  #if defined(OMP_ACCELERATION)
   omp_set_default_device(devID);
-#pragma omp target teams distribute parallel for collapse(2) private(wterm) map(tofrom : image_real[0 : xaxis * yaxis], image_imag[0 : xaxis * yaxis]) //device(devID)
+ #pragma omp target teams distribute parallel for collapse(2) private(wterm) map(tofrom : image_real[0 : xaxis * yaxis], image_imag[0 : xaxis * yaxis]) //device(devID)
  #else
- #pragma omp parallel for collapse(2) private(wterm)
+ #pragma omp parallel for collapse(2) private(wterm) num_threads(num_threads)
  #endif //OMP_ACCELERATION
   for (int iw = 0; iw < num_w_planes; iw++)
   {
@@ -290,6 +292,83 @@ void phase_correction(
 #endif // end of PHASE_ON
       }
   }
+  */
+ #if defined(OMP_ACCELERATION)
+  omp_set_default_device(devID);
+ #pragma omp target teams distribute parallel for collapse(2) private(wterm) map(tofrom : image_real[0 : xaxis * yaxis], image_imag[0 : xaxis * yaxis])
+ #else
+ #pragma omp parallel for collapse(2) private(wterm) num_threads(num_threads)
+ #endif
+  for (int iw = 0; iw < num_w_planes; iw++)
+    {
+      for (int iv = 0; iv < yaxis; iv++)
+	for (int iu = 0; iu < xaxis; iu++)
+	  {
+	    
+	    myull img_index = (myull)iu + (myull)iv * xaxis;
+	    myull index = 2 * (img_index + (myull)xaxis * yaxis * iw);
+	    
+	    wterm = wmin + iw * dw;
+
+	   #ifdef PHASE_ON
+	    if (num_w_planes > 1)
+	      {
+		// NUOVA MODIFICA: Sostituito il calcolo errato di xcoord/ycoord
+		// con la mappatura lineare standard per i coseni direttori l e m.
+		// Questo era il secondo bug che causava l'immagine distorta.
+		double l = ((double)iu - (double)xaxistot / 2.0) * resolution;
+		double m = ((double)iv - (double)yaxistot / 2.0) * resolution;
+
+		double radius2 = l * l + m * m;
+
+		// MODIFICA PRECEDENTE (ancora valida): 
+		// Controllo per evitare sqrt() di numeri negativi.
+		if (radius2 < 1.0)
+		  {
+		    double n_minus_1 = sqrt(1.0 - radius2) - 1.0;
+		    double phase_arg = 2.0 * PI * wterm * n_minus_1;
+		    double preal = cos(phase_arg);
+		    double pimag = sin(phase_arg);
+
+		    double p = gridss[index];
+		    double q = gridss[index + 1];
+
+		    double projection_factor = sqrt(1.0 - radius2);
+
+		   #pragma omp atomic
+		    image_real[img_index] += (p * preal - q * pimag) * dwnorm * projection_factor;
+		   #pragma omp atomic
+		    image_imag[img_index] += (p * pimag + q * preal) * dwnorm * projection_factor;
+		  }
+		else // AGGIUNGI QUESTO BLOCCO: radius2 >= 1.0
+		  {
+		    // Quando siamo fuori dal FoV unitario, sommiamo il dato
+		    // grigliato senza fase e con un fattore di proiezione piatto.
+		    // Moltiplicare per dwnorm assicura la normalizzazione corretta.
+		    
+		   #pragma omp atomic
+		    image_real[img_index] += gridss[index] * dwnorm;
+		   #pragma omp atomic
+		    image_imag[img_index] += gridss[index + 1] * dwnorm;
+		  }
+	      }
+	    else
+	      {
+	       #pragma omp atomic
+		image_real[img_index] += gridss[index];
+	       #pragma omp atomic
+		image_imag[img_index] += gridss[index + 1];
+	      }
+	   #else
+	   #pragma omp atomic
+	    image_real[img_index] += gridss[index];
+	   #pragma omp atomic
+	    image_imag[img_index] += gridss[index + 1];
+	   #endif // end of PHASE_ON
+	  }
+    }
+  
+  timing.phase += WALLCLOCK_TIME - phase_0;
   
 #else
   omp_set_default_device(rank % omp_get_num_devices());
@@ -373,7 +452,7 @@ void phase_correction(
   if (rank == 0)
   {
     printf("WRITING IMAGE\n");
-
+    
 #ifdef FITSIO
     printf("REMOVING RESIDUAL FITS FILE\n");
     remove(testfitsreal);
@@ -394,6 +473,8 @@ void phase_correction(
 #endif
   }
 
+  double write_0 = WALLCLOCK_TIME;
+  
   if (size > 1)
   {
     MPI_Barrier(MYMPI_COMM);
@@ -463,4 +544,6 @@ void phase_correction(
   MPI_File_close(&pFileimg);
 
   MPI_Barrier(MYMPI_COMM);
+
+  timing.write += WALLCLOCK_TIME - write_0;
 }

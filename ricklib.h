@@ -97,13 +97,14 @@ typedef struct {
   double fft;        // time spent in FFT Contains MPI-I/O when WRITE_DATA is defined;
   double phase;      // time spent in phase correction Contains MPI-I/O for image writing
   double total;      // total runtime
+  double write;      // time spent in writing the final image (MPI-I/O)
 } timing_t;
 
 extern timing_t timing;      // wall-clock process timing
 
 
 #define MPI_COUNT_T MPI_UNSIGNED_LONG_LONG
-#define SIGMA_FACTOR_Y 6.0
+//#define SIGMA_FACTOR_Y 10.0
 
 /* If nothing is defined, the HeFFTe will go for FFTW backend */
 

@@ -413,14 +413,16 @@ void wstack(
 
   myuint y_end = y_start + yaxis - 1;
 
-  myull iKer = 0;
-  myuint k, j = 0;
-  
+  //myull iKer = 0;
+  //myuint k, j = 0;
+
  #if defined(OMP_ACCELERATION)
   //#pragma omp target parallel for private(visindex) map(to: convkernel[0:increaseprecision*w_support]) device(devID)
   omp_set_default_device(devID);
   //#pragma omp target enter data map(to: grid[0:2*num_w_planes*grid_size_x*yaxis]) //device(devID)
  #pragma omp target teams distribute parallel for private(visindex) map(to: convkernel[0:increaseprecision*w_support])  //device(devID)
+ #else 
+  #pragma omp parallel for private(visindex) num_threads(num_threads)
  #endif //OMP_ACCELERATION
   for (i = 0; i < num_points; i++)
   {
@@ -432,10 +434,18 @@ void wstack(
 
     if (ww[i] == 1)
       continue;
-    
+      
     visindex = i * freq_per_chan;
 
-    //myuint j, k;
+    /*
+    if (vis_real[visindex] > 100 || vis_real[visindex] < -100)
+      continue;
+
+    if (vis_img[visindex] > 100 || vis_img[visindex] < -100)
+      continue;
+    */
+    myull  iKer;
+    myuint j, k;
 
     /* Convert UV coordinates to grid coordinates. */
     double pos_u = uu[i] / dx;
@@ -530,8 +540,13 @@ void wstack(
             add_term_real += out_weight_uniform[iweight] * vis_real[ifine] * conv_weight;
             add_term_img  += out_weight_uniform[iweight] * vis_img[ifine] * conv_weight;
 #else
+	    
             add_term_real += weight[iweight] * vis_real[ifine] * conv_weight;
             add_term_img  += weight[iweight] * vis_img[ifine] * conv_weight;
+	    /*
+	    add_term_real += vis_real[ifine] * conv_weight;
+            add_term_img  += vis_img[ifine] * conv_weight;
+	    */
 #endif
           }
           ifine++;
@@ -851,8 +866,9 @@ void gridding(
 
   // double start = CPU_TIME_wt;
 
-  myull size_of_grid = 2 * num_w_planes * xaxis * yaxis;
-
+  //myull size_of_grid = 2 * num_w_planes * xaxis * yaxis;
+  myull size_of_grid = (myull)xaxis * yaxis * num_w_planes * 2;
+  
   double dx = 1.0 / (double)xaxis;
   double dw = 1.0 / (double)num_w_planes;
   double w_supporth = (double)((w_support - 1) / 2) * dx;

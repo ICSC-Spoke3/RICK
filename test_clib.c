@@ -23,7 +23,8 @@
 int devID;
 #endif //OMP_ACCELERATION
 
-
+/* DEFINE THE TIMINGS STRUCTURE */
+timing_t timing = {0};
 
 /* Struct for domain decomposition */
 typedef struct {
@@ -273,9 +274,10 @@ void io_read(int rank, char *filename, char *datapath, MPI_File File, char *rfil
 
 
 void compute_gaussian_1d_decomp(int N_x, int N_y,
-                                  int N_P, int rank,
-                                  int *start_x, int *start_y,
-                                  int *size_x, int *size_y)
+				int N_P, int rank,
+				int *start_x, int *start_y,
+				int *size_x, int *size_y,
+				double SIGMA_FACTOR_Y)
 {
     // X axis is not decomposed
     *start_x = 0;
@@ -364,14 +366,15 @@ void collect_decomposition(int rank, int size,
 /* FUNCTION FOR TIMINGS */
 void write_timings(int rank, timing_t timing)
 {
-  double time_IO, time_check, time_bucket, time_comm, time_gridding, time_fft, time_phase, time_total;
+  double time_IO, time_check, time_bucket, time_comm, time_gridding, time_fft, time_phase, time_write, time_total;
   
   MPI_Reduce(&timing.IO, &time_IO, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
   MPI_Reduce(&timing.gridding, &time_gridding, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
   MPI_Reduce(&timing.fft, &time_fft, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
   MPI_Reduce(&timing.phase, &time_phase, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+  MPI_Reduce(&timing.write, &time_write, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
   MPI_Reduce(&timing.total, &time_total, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
-
+  
   MPI_Reduce(&timing.check, &time_check, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
   MPI_Reduce(&timing.bucket, &time_bucket, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
   MPI_Reduce(&timing.communication, &time_comm, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
@@ -385,6 +388,7 @@ void write_timings(int rank, timing_t timing)
       printf("%40s time: %g sec\n", "Gridding", time_gridding);
       printf("%40s time: %g sec\n", "FFT", time_fft);
       printf("%40s time: %g sec\n", "Phase correction", time_phase);
+      printf("%40s time: %g sec\n", "I/O (write)", time_write);
       printf("%40s time: %g sec\n", "Total", time_total);
     }
 
@@ -399,6 +403,8 @@ int main(int argc, char **argv)
   int size;
 
   int num_files_to_read = 6;
+
+  double sigma_gauss = (argc>1 ? atof(*(argv+1)) : 1000.0);
   
   // Define main filenames
   FILE *pFile;
@@ -457,7 +463,7 @@ int main(int argc, char **argv)
   int yaxis;
 
   // Number of planes in the w direction
-  int num_w_planes = 8;
+  int num_w_planes = 4;
 
   // Size of the convoutional kernel support
   int w_support = 7;
@@ -484,6 +490,8 @@ int main(int argc, char **argv)
 
 #ifdef _OPENMP
   num_threads = omp_get_max_threads();
+  if (rank == 0)
+    printf("Running with %d threads\n", num_threads);
 #else
   num_threads = 1;
 #endif //_OPENMP
@@ -494,7 +502,12 @@ int main(int argc, char **argv)
 
   /* Distinguish between NVIDIA and AMD platforms (Setonix is an example) */
  #if defined(NVIDIA)
-  devID = rank % omp_get_num_devices();
+  int num_devices = omp_get_num_devices();
+
+  if (num_devices > 1)
+    devID = rank % num_devices;
+  else
+    devID = 0;
  #elif defined(AMD)
   //devID = 0;
   int num_devices = omp_get_num_devices();
@@ -573,7 +586,7 @@ int main(int argc, char **argv)
     printf("Compute Gaussian DD along y (v) axis...\n");
   
   /* COMPUTE GAUSSIAN SLAB DECOMPOSITION ALONG Y AXIS */
-  compute_gaussian_1d_decomp(grid_size_x, grid_size_y, size, rank, &x_start, &y_start, &xaxis, &yaxis);
+  compute_gaussian_1d_decomp(grid_size_x, grid_size_y, size, rank, &x_start, &y_start, &xaxis, &yaxis, sigma_gauss);
 
   int x_end = x_start + xaxis;
   int y_end = y_start + yaxis;
@@ -605,17 +618,7 @@ int main(int argc, char **argv)
   
   
   int ndatasets = 1;
-  //strcpy(datapath_multi[0], "/beegfs/glacopo/IMAGING/ZW2_IFRQ_0444.binMS/");
-  //strcpy(datapath_multi[0], "/data/ZW2_IFRQ_0444.binMS/");
-  //strcpy(datapath_multi[0], "/scratch/pawsey1026/glacopo/ASKAP_DATA/binMS/scienceData.EMU_1326-32.SB73478.EMU_1326-32.beam26_averaged_cal.leakage.binMS/");
-  //strcpy(datapath_multi[0], "/scratch/pawsey1026/glacopo/ASKAP_DATA_OLD/binMS/scienceData.EMU_0940+00A.SB74401.EMU_0940+00A.beam18_averaged_cal.leakage.binMS/");
-  strcpy(datapath_multi[0], "/scratch/pawsey1026/glacopo/ASKAP_DATA/binMS/scienceData.EMU_1326-32.SB73478.EMU_1326-32.beam13_averaged_cal.leakage.binMS/");
-  //strcpy(datapath_multi[0], "/scratch/pawsey1026/glacopo/tail01_L720378_SB001_uv_12DFF03B0t_121MHz_12DFF03BFt_143MHz_120ch_flag.binMS/");
-  //strcpy(datapath_multi[0], "/software/projects/pawsey1026/glacopo/hpc_imaging/data/newgauss2noconj_t201806301100_SBL180.binMS/");
-  //strcpy(datapath_multi[0], "/scratch/pawsey1026/glacopo/ZW2_IFRQ_0444.binMS/");
-  //strcpy(datapath_multi[0], "/scratch/pawsey1026/glacopo/SKA_DC/ZW2_IFRQ_0063.binMS/");
-  //strcpy(datapath_multi[0], "/leonardo/pub/userexternal/ederubei/datasets/tail01_L720378_SB001_uv_12DFF03B0t_121MHz_12DFF03BFt_143MHz_120ch_flag.binMS/");
-  //strcpy(datapath_multi[0], "/u/glacopo/RICK_PMT/newgauss2noconj_t201806301100_SBL180.binMS/");
+  strcpy(datapath_multi[0], "./newgauss2noconj_t201806301100_SBL180.binMS/");
 
   char metaname[1000];
   
@@ -664,8 +667,6 @@ int main(int argc, char **argv)
 
   double *vvt = (double*)malloc(Nmeasures*sizeof(double));
     
-  /* DEFINE THE TIMINGS STRUCTURE */
-  timing_t timing = {0};
 
   if (rank == 0)
     printf("READING DATA WITH MPI-I/O AND DISTRIBUTING WITH POINT-TO-POINT COMMUNICATION\n");
@@ -722,7 +723,13 @@ int main(int argc, char **argv)
     }
 
   myull *bucket_sort = (myull*)malloc(offset_bs*sizeof(myull));
-  myull *ncount = (myull*)calloc(size, sizeof(myull));
+
+  if (size < 1)
+    {
+      size = 1; 
+    }
+  
+  myull *ncount = (myull*)calloc((size_t)size, sizeof(myull));
   for (myull i=0; i<Nmeasures; i++)
     for (int r = 0; r < size; r++)
       {
@@ -922,6 +929,26 @@ int main(int argc, char **argv)
   io_read(rank, filename, datapath, pFile1, rfiles[4], (char*)vis_realt, sizeof(float) * startrow_v, Nvis * sizeof(float));
     
   timing.IO += WALLCLOCK_TIME - start_read;
+
+  /*
+  #include <limits.h>
+  #include <float.h>
+  float maxvv = -FLT_MAX;
+  float minvv = FLT_MAX;
+
+  // Calcola il massimo e il minimo
+  for (unsigned long i = 0; i < Nvis; i++) {
+    if (vis_realt[i] > maxvv) {
+      maxvv = vis_realt[i];
+    }
+    if (vis_realt[i] < minvv) {
+      minvv = vis_realt[i];
+    }
+  }
+
+   printf("Massimo: %f\n", maxvv);
+   printf("Minimo: %f\n", minvv);
+  */
   
   /* Allocate a new buffer for visibility data */
   float *buffer_vis = (float*)malloc(offset_bs*freq_per_chan*polarisations*sizeof(float));
@@ -986,8 +1013,9 @@ int main(int argc, char **argv)
   free(min);
   free(max);
 
-  myull size_of_grid = 2 * num_w_planes * xaxis * yaxis;
-
+  //myull size_of_grid = 2 * num_w_planes * xaxis * yaxis;
+  myull size_of_grid = 2 * ((myull)num_w_planes * xaxis * yaxis);
+  
   double *grid;
   grid = (double *)calloc(size_of_grid,sizeof(double));
 
@@ -1084,7 +1112,7 @@ int main(int argc, char **argv)
   
   timing.fft += WALLCLOCK_TIME - fft_start;
 
-  double phase_start = WALLCLOCK_TIME;
+  //double phase_start = WALLCLOCK_TIME;
   
   phase_correction(
       grid,
@@ -1105,7 +1133,7 @@ int main(int argc, char **argv)
       rank,
       MPI_COMM_WORLD);
 
-  timing.phase += WALLCLOCK_TIME - phase_start;
+  //timing.phase += WALLCLOCK_TIME - phase_start;
 
   free(image_imag);
   free(image_real);
