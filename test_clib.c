@@ -539,22 +539,6 @@ int main(int argc, char **argv)
     printf("\n");
     printf("Radio Imaging Code Kernels Library (v2.0.0)\n");
     printf("\n");
-
-     printf("\033[1;31m"); // colore rosso
-    printf("\n");
-    printf("FFFFF  OOOO  RRRR   ZZZZZ  AAAAA\n");
-    printf("F     O   O  R   R     Z   A   A\n");
-    printf("FFF   O   O  RRRR    Z     AAAAA\n");
-    printf("F     O   O  R R    Z      A   A\n");
-    printf("F      OOOO  R  R   ZZZZZ  A   A\n");
-    printf("\n");
-    printf("FFFFF  EEEEE  RRRR   RRRR   AAAAA  RRRR   IIIIII\n");
-    printf("F      E      R   R  R   R  A   A  R   R     I   \n");
-    printf("FFFFF  EEEEE  RRRR   RRRR   AAAAA  RRRR      I   \n");
-    printf("F      E      R R    R R    A   A  R R       I   \n");
-    printf("F      EEEEE  R  R   R  R   A   A  R  R   IIIIII\n");
-    printf("\033[0m"); // reset colore
-    printf("\n");
     
     printf("Running with %d MPI tasks\n", size);
     

@@ -33,11 +33,11 @@ make -j$(nproc)
 
 # 5. Provide feedback to the user
 if [ -f "rick" ]; then
-    echo "------------------------------------------------"
+    echo "-------------------------------------------------------"
     echo "Build Successful! Executable 'rick' created."
     echo "Location: $(pwd)/rick"
-    echo "To run it, use: mpirun -np <procs> ./build/rick"
-    echo "------------------------------------------------"
+    echo "To run it, use: mpirun -np <procs> ./build/rick [SIGMA]"
+    echo "-------------------------------------------------------"
 else
     echo "Build failed: Executable not found."
     exit 1
