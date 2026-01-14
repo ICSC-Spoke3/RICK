@@ -61,29 +61,35 @@ add_executable(rick ${SOURCES})
 
 # --- 5. Compiler Flags & Optimizations ---
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|Intel")
-    # Flag comuni a tutte le architetture
-    set(COMMON_FLAGS "-O3 -Wno-unused-result")
+    
+    # Initialize a list with common optimization and warning flags
+    # -O3: High-level optimization
+    # -Wno-unused-result: Silence warnings for ignored return values (e.g., fscanf)
+    set(RICK_FLAGS "-O3" "-Wno-unused-result")
 
+    # Architecture-specific optimizations
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64")
-        # Intel/AMD processors
-        target_compile_options(rick PRIVATE
-            $<$<CONFIG:Release>:${COMMON_FLAGS} -march=native -mtune=native -mavx -mavx2 -Wno-unused-result>
-            ${OpenMP_C_FLAGS}
-        )
+        # Flags for Intel/AMD architectures
+        # -march=native: Optimize for the host CPU instructions
+        # -mavx -mavx2: Enable Advanced Vector Extensions
+        list(APPEND RICK_FLAGS "-march=native" "-mtune=native" "-mavx" "-mavx2")
+        message(STATUS "Architecture detected as x86_64. Enabling AVX/AVX2 flags.")
+        
     elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
-        # ARM processors (Apple Silicon, Graviton, etc.)
-        # Note: on ARM 'native' usually utilizes NEON
-        target_compile_options(rick PRIVATE
-            $<$<CONFIG:Release>:${COMMON_FLAGS} -march=native -mtune=native -Wno-unused-result>
-            ${OpenMP_C_FLAGS}
-        )
+        # Flags for ARM architectures (Apple Silicon, AWS Graviton, etc.)
+        # AVX flags are removed as they are incompatible with ARM
+        list(APPEND RICK_FLAGS "-march=native" "-mtune=native")
+        message(STATUS "Architecture detected as ARM64. Using NEON/Native optimizations.")
+        
     else()
-        # Fallback generico
-        target_compile_options(rick PRIVATE
-            $<$<CONFIG:Release>:${COMMON_FLAGS} -O3>
-            ${OpenMP_C_FLAGS}
-        )
+        # Fallback for other architectures
+        message(STATUS "Unknown architecture (${CMAKE_SYSTEM_PROCESSOR}). Using generic O3.")
     endif()
+
+    # Apply the gathered flags to the 'rick' target
+    # We also include OpenMP specific flags detected by find_package(OpenMP)
+    target_compile_options(rick PRIVATE ${RICK_FLAGS} ${OpenMP_C_FLAGS})
+
 endif()
 
 # --- 6. Include Directories and Linking ---
@@ -100,7 +106,6 @@ target_link_libraries(rick PRIVATE
     ${HEFFTE_LIBRARY}
     ${FFTW3_LIBRARIES}
     ${FFTW3_OMP_LIB}   # <--- Crucial fix for 'fftw_plan_with_nthreads'
-    m
 )
 
 if(ENABLE_FITSIO)
