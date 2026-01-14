@@ -610,19 +610,26 @@ int main(int argc, char **argv)
   // Read metadata
   strcpy(metaname, datapath);
   strcat(metaname, metafile);
+
   pFile = fopen(metaname, "r");
-  fscanf(pFile, "%llu", &Nmeasures);
-  fscanf(pFile, "%llu", &Nvis);
-  fscanf(pFile, "%d", &freq_per_chan);
-  fscanf(pFile, "%d", &polarisations);
-  fscanf(pFile, "%u", &Ntimes);
-  fscanf(pFile, "%lf", &dt);
-  fscanf(pFile, "%lf", &thours);
-  fscanf(pFile, "%ld", &baselines);
-  fscanf(pFile, "%lf", &uvmin);
-  fscanf(pFile, "%lf", &uvmax);
-  fscanf(pFile, "%lf", &wmin);
-  fscanf(pFile, "%lf", &wmax);
+  if (pFile == NULL)
+    {
+      fprintf(stderr, "Error! File %s not found!\n", metaname);
+      return -1; 
+    }
+  
+  (void)fscanf(pFile, "%llu", &Nmeasures);
+  (void)fscanf(pFile, "%llu", &Nvis);
+  (void)fscanf(pFile, "%d", &freq_per_chan);
+  (void)fscanf(pFile, "%d", &polarisations);
+  (void)fscanf(pFile, "%u", &Ntimes);
+  (void)fscanf(pFile, "%lf", &dt);
+  (void)fscanf(pFile, "%lf", &thours);
+  (void)fscanf(pFile, "%ld", &baselines);
+  (void)fscanf(pFile, "%lf", &uvmin);
+  (void)fscanf(pFile, "%lf", &uvmax);
+  (void)fscanf(pFile, "%lf", &wmin);
+  (void)fscanf(pFile, "%lf", &wmax);
   fclose(pFile);
 
   Nvis = Nmeasures * freq_per_chan * polarisations;
