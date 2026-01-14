@@ -61,10 +61,29 @@ add_executable(rick ${SOURCES})
 
 # --- 5. Compiler Flags & Optimizations ---
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|Intel")
-    target_compile_options(rick PRIVATE
-        $<$<CONFIG:Release>:-O3 -march=native -mtune=native -mavx -mavx2>
-        ${OpenMP_C_FLAGS}
-    )
+    # Flag comuni a tutte le architetture
+    set(COMMON_FLAGS "-O3 -Wno-unused-result")
+
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64")
+        # Intel/AMD processors
+        target_compile_options(rick PRIVATE
+            $<$<CONFIG:Release>:${COMMON_FLAGS} -march=native -mtune=native -mavx -mavx2 -Wno-unused-result>
+            ${OpenMP_C_FLAGS}
+        )
+    elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+        # ARM processors (Apple Silicon, Graviton, etc.)
+        # Note: on ARM 'native' usually utilizes NEON
+        target_compile_options(rick PRIVATE
+            $<$<CONFIG:Release>:${COMMON_FLAGS} -march=native -mtune=native -Wno-unused-result>
+            ${OpenMP_C_FLAGS}
+        )
+    else()
+        # Fallback generico
+        target_compile_options(rick PRIVATE
+            $<$<CONFIG:Release>:${COMMON_FLAGS} -O3>
+            ${OpenMP_C_FLAGS}
+        )
+    endif()
 endif()
 
 # --- 6. Include Directories and Linking ---
