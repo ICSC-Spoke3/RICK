@@ -106,6 +106,7 @@ target_link_libraries(rick PRIVATE
     ${HEFFTE_LIBRARY}
     ${FFTW3_LIBRARIES}
     ${FFTW3_OMP_LIB}   # <--- Crucial fix for 'fftw_plan_with_nthreads'
+    m
 )
 
 if(ENABLE_FITSIO)
