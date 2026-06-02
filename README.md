@@ -14,7 +14,9 @@ It exploits the Message Passing Interface (MPI) and OpenMP for parallelism, and 
 RICK library is made for creating shared libraries to be called within any radio interferometric imaging software or, more simply, within a Python script. <br>
 RICKlib requires the following softwares:
 - MPI
-- fftw3
+- fftw3 (soon updated to HeFFTe)
+
+The code assumes that the input MS has been created with the new version of create_binMS.py, which adds conjugate baselines and has the $u$, $v$, $w$ coordinates in wavelength units. If you need it, please get in contact with us, since this is still in its testing phase.
 
 ### In Python:
 To compile the individual libraries use the following commands:
@@ -33,7 +35,7 @@ After this, you can run the Python script `lib_test.py` specifying the directory
 ### IN C:
 
 ```
-> mpicc -DGAUSS -DUSE_MPI -DPHASE_ON -DSTOKESI -DWRITE_DATA -lfftw3_mpi -lfftw3 -lm test_clib.c gridding_library.c fft_library.c phase_correction_library.c -o test.exe
+> mpicc -DGAUSS -DUSE_MPI -DPHASE_ON -DSTOKESI -DWRITE_DATA -lfftw3_mpi -lfftw3 -lm *.c -o test.exe
 ```
 
 To run the library
