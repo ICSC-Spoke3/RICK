@@ -35,7 +35,7 @@ void fftw_data(
   // FFT transform the data (using distributed FFTW)
   if (rank == 0)
   {
-    printf("RICK FFT\n");
+    printf("RICK FFT - with shift as in the refactoring\n");
   }
 
   FFT_INIT;
@@ -81,10 +81,11 @@ void fftw_data(
     {
       for (int iu = 0; iu < xaxis; iu++)
       {
+        double sign = (((iu + iv + iw) & 1) == 0) ? 1.0 : -1.0;   // Required for the shift before the FFT, as in the refactoring
         fftwindex2D = iu + iv * xaxis;
         fftwindex = 2 * (fftwindex2D + iw * xaxis * yaxis);
-        fftwgrid[fftwindex2D][0] = grid[fftwindex];
-        fftwgrid[fftwindex2D][1] = grid[fftwindex + 1];
+        fftwgrid[fftwindex2D][0] = sign * grid[fftwindex];
+        fftwgrid[fftwindex2D][1] = sign * grid[fftwindex + 1];
       }
     }
 

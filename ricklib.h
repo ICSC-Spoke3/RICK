@@ -49,8 +49,7 @@ void gridding(
     float *,
 #endif
     double,
-    double,
-    int);
+    double);
 
 void fftw_data(
     int,

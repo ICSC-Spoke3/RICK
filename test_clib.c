@@ -40,7 +40,7 @@ int main(int argc, char **argv)
   char weightsfile[FILENAMELENGTH] = "weights.bin";
   char visrealfile[FILENAMELENGTH] = "visibilities_real.bin";
   char visimgfile[FILENAMELENGTH] = "visibilities_img.bin";
-  char channels[FILENAMELENGTH] = "freq_file.bin";
+  //char channels[FILENAMELENGTH] = "freq_file.bin";
   char metafile[FILENAMELENGTH] = "meta.txt";
 
 #if defined(WRITE_DATA)
@@ -57,15 +57,15 @@ int main(int argc, char **argv)
   float *weights;
   float *visreal;
   float *visimg;
-  float *channels_ref;
+  //float *channels_ref;
 
-  int Nmeasures;
-  long Nvis;
-  int Nweights;
+  unsigned long Nmeasures;
+  unsigned long Nvis;
+  unsigned int Nweights;
   int freq_per_chan;
   int polarisations;
-  int nweights1, nweights2, nweights3;
-  int Ntimes;
+  //int nweights1, nweights2, nweights3;
+  unsigned int Ntimes;
   double dt;
   double thours;
   long baselines;
@@ -78,8 +78,8 @@ int main(int argc, char **argv)
   // Mesh related parameters
 
   // Grid size in pixels
-  int grid_size_x = 4096;
-  int grid_size_y = 4096;
+  int grid_size_x = 1024;
+  int grid_size_y = 1024;
 
   // Split Mesh size (auto-calculated)
   int local_grid_size_x;
@@ -148,14 +148,14 @@ int main(int argc, char **argv)
   yaxis = grid_size_y / size;
 
   int ndatasets = 1;
-  strcpy(datapath_multi[0], "/Users/e.derubeis/hpc_imaging/data/hba_8hours_150_simulated.binMS/");
+  strcpy(datapath_multi[0], "/Users/e.derubeis/hpc_imaging/data/hba_8hours_150_simulated.refactor.binMS/");
 
   strcpy(datapath, datapath_multi[0]);
   // Read metadata
   strcpy(filename, datapath);
   strcat(filename, metafile);
   pFile = fopen(filename, "r");
-  fscanf(pFile, "%u", &Nmeasures);
+  fscanf(pFile, "%lu", &Nmeasures);
   fscanf(pFile, "%ld", &Nvis);
   fscanf(pFile, "%d", &freq_per_chan);
   fscanf(pFile, "%d", &polarisations);
@@ -167,13 +167,13 @@ int main(int argc, char **argv)
   fscanf(pFile, "%lf", &uvmax);
   fscanf(pFile, "%lf", &wmin);
   fscanf(pFile, "%lf", &wmax);
-  fscanf(pFile, "%d", &nweights1);
-  fscanf(pFile, "%d", &nweights2);
-  fscanf(pFile, "%d", &nweights3);
+  //fscanf(pFile, "%d", &nweights1);
+  //fscanf(pFile, "%d", &nweights2);
+  //fscanf(pFile, "%d", &nweights3);
   fclose(pFile);
 
   Nvis = Nmeasures * freq_per_chan * polarisations;
-  Nweights = nweights1 * nweights2 * nweights3;
+  Nweights = Nmeasures * polarisations;
 
   long nm_pe = (long)(Nmeasures / size);
   long remaining = Nmeasures % size;
@@ -183,11 +183,11 @@ int main(int argc, char **argv)
 
   Nmeasures = nm_pe;
   Nvis = Nmeasures * freq_per_chan * polarisations;
-  Nweights = nweights1 * nweights2 * nweights3;
+  Nweights = Nmeasures * polarisations;
 
   if (rank == 0)
   {
-    printf("N. measurements %d\n", Nmeasures);
+    printf("N. measurements %lu\n", Nmeasures);
     printf("N. visibilities %ld\n", Nvis);
   }
 
@@ -197,7 +197,7 @@ int main(int argc, char **argv)
   weights = (float *)calloc(Nweights, sizeof(float));
   visreal = (float *)calloc(Nvis, sizeof(float));
   visimg = (float *)calloc(Nvis, sizeof(float));
-  channels_ref = (float *)calloc(freq_per_chan, sizeof(float));
+  //channels_ref = (float *)calloc(freq_per_chan, sizeof(float));
 
   if (rank == 0)
     printf("READING DATA\n");
@@ -232,7 +232,7 @@ int main(int argc, char **argv)
   strcpy(filename, datapath);
   strcat(filename, weightsfile);
   pFile = fopen(filename, "rb");
-  fseek(pFile, startrow * nweights2 * nweights3 * sizeof(float), SEEK_SET);
+  fseek(pFile, startrow * polarisations * sizeof(float), SEEK_SET);
   fread(weights, (Nweights) * sizeof(float), 1, pFile);
   fclose(pFile);
 
@@ -252,13 +252,16 @@ int main(int argc, char **argv)
   fread(visimg, Nvis * sizeof(float), 1, pFile);
   fclose(pFile);
 
+  /*
   strcpy(filename, datapath);
   strcat(filename, channels);
   pFile = fopen(filename, "rb");
   fseek(pFile, 0, SEEK_SET);
   fread(channels_ref, freq_per_chan * sizeof(float), 1, pFile);
   fclose(pFile);
+  */
 
+/*
 #ifdef VERBOSE
   // Add this debug print
   if (rank == 0)
@@ -270,6 +273,7 @@ int main(int argc, char **argv)
     }
   }
 #endif
+*/
 
   long size_of_grid = 2 * num_w_planes * xaxis * yaxis;
 
@@ -281,7 +285,7 @@ int main(int argc, char **argv)
   double *image_real = (double *)calloc(xaxis * yaxis, sizeof(double));
   double *image_imag = (double *)calloc(xaxis * yaxis, sizeof(double));
 
-#if defined(STOKESI) || defined(STOKESQ) || defined(STOKESU)
+#if defined(STOKESI) || defined(STOKESQ) || defined(STOKESU) || defined(STOKESV)
 
   // float weights_stokes_sum;
   float *visreal_stokes;
@@ -306,30 +310,30 @@ int main(int argc, char **argv)
 
   // float listfreq[] = {1.20237732e+08, 1.20286560e+08, 1.20335388e+08, 1.20384216e+08};
 
-  for (int freq_index = 0; freq_index < freq_per_chan; freq_index++)
-  {
-    double *uu_in_m = (double *)malloc(Nmeasures * sizeof(double));
-    double *vv_in_m = (double *)malloc(Nmeasures * sizeof(double));
-    double *ww_in_m = (double *)malloc(Nmeasures * sizeof(double));
+  //for (int freq_index = 0; freq_index < freq_per_chan; freq_index++)
+  //{
+    //double *uu_in_m = (double *)malloc(Nmeasures * sizeof(double));
+    //double *vv_in_m = (double *)malloc(Nmeasures * sizeof(double));
+    //double *ww_in_m = (double *)malloc(Nmeasures * sizeof(double));
 
-    // printf("channels ref [%d] = %f\n", freq_index, channels_ref[freq_index]);
-    float wavelength = (float)(299792458.0) / channels_ref[freq_index];
-    printf("wavelength = %f\n", wavelength);
-    for (int i = 0; i < Nmeasures; i++)
-    {
-      uu_in_m[i] = uu[i] / (double)wavelength;
-      // printf("%f \n", uu_in_m[i]);
-      vv_in_m[i] = vv[i] / (double)wavelength;
-      ww_in_m[i] = ww[i] / (double)wavelength;
-    }
+    // // printf("channels ref [%d] = %f\n", freq_index, channels_ref[freq_index]);
+    //float wavelength = (float)(299792458.0) / channels_ref[freq_index];
+    //printf("wavelength = %f\n", wavelength);
+    //for (int i = 0; i < Nmeasures; i++)
+    //{
+    //  uu_in_m[i] = uu[i] / (double)wavelength;
+    //  // printf("%f \n", uu_in_m[i]);
+    //  vv_in_m[i] = vv[i] / (double)wavelength;
+    //  ww_in_m[i] = ww[i] / (double)wavelength;
+    //}
 
     gridding(
         rank,
         size,
         Nmeasures,
-        uu_in_m,
-        vv_in_m,
-        ww_in_m,
+        uu,
+        vv,
+        ww,
         grid,
         gridss,
         MPI_COMM_WORLD,
@@ -344,7 +348,7 @@ int main(int argc, char **argv)
         gridded_writedata1,
         gridded_writedata2,
 #endif
-#if defined(STOKESI) || defined(STOKESQ) || defined(STOKESU)
+#if defined(STOKESI) || defined(STOKESQ) || defined(STOKESU) || defined(STOKESV)
         visreal_stokes,
         visimg_stokes,
         weights_stokes,
@@ -354,13 +358,12 @@ int main(int argc, char **argv)
         weights,
 #endif
         uvmin,
-        uvmax,
-        freq_index);
+        uvmax);
 
-    free(uu_in_m);
-    free(vv_in_m);
-    free(ww_in_m);
-  }
+    //free(uu_in_m);
+    //free(vv_in_m);
+    //free(ww_in_m);
+  //}
 
   fftw_data(
       grid_size_x,

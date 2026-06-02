@@ -21,7 +21,7 @@
 int *histo_send;
 int **sectorarray;
 
-#if defined(STOKESI) || defined(STOKESQ) || defined(STOKESU)
+#if defined(STOKESI) || defined(STOKESQ) || defined(STOKESU) || defined(STOKESV)
 float *visreal_stokes_ch;
 float *visimg_stokes_ch;
 float *weights_stokes_ch;
@@ -129,19 +129,20 @@ void weighting_briggs(
   weight_uv_2[iKer] += (weight[visindex] * weight[visindex]);
 }
 
+/*
 void channelselect(
     unsigned int Nmeasures,
     int freq_per_chan,
     #if defined(STOKESI) || defined(STOKESQ) || defined(STOKESU)
     float *visreal_stokes,
     float *visimg_stokes,
-    float *weights_stokes,
+    float *weights_stokes
     #else
     float *visreal,
     float *visimg,
-    float *weights,
+    float *weights
     #endif
-    int freq_index)
+)
 {
   #if defined(STOKESI) || defined(STOKESQ) || defined(STOKESU)
   visreal_stokes_ch = (float *)malloc(Nmeasures * freq_per_chan * sizeof(float));
@@ -156,13 +157,13 @@ void channelselect(
   for (unsigned int ichan = 0; ichan < Nmeasures; ichan++)
   {
     #if defined(STOKESI) || defined(STOKESQ) || defined(STOKESU)
-    visreal_stokes_ch[ichan] = visreal_stokes[ichan * freq_per_chan + freq_index];
-    visimg_stokes_ch[ichan] = visimg_stokes[ichan * freq_per_chan + freq_index];
-    weights_stokes_ch[ichan] = weights_stokes[ichan * freq_per_chan + freq_index];
+    visreal_stokes_ch[ichan] = visreal_stokes[ichan * freq_per_chan];
+    visimg_stokes_ch[ichan] = visimg_stokes[ichan * freq_per_chan];
+    weights_stokes_ch[ichan] = weights_stokes[ichan * freq_per_chan];
     #else
-    visreal_ch[ichan] = visreal[ichan * freq_per_chan + freq_index];
-    visimg_ch[ichan] = visimg[ichan * freq_per_chan + freq_index];
-    weights_ch[ichan] = weights[ichan * freq_per_chan + freq_index];
+    visreal_ch[ichan] = visreal[ichan * freq_per_chan];
+    visimg_ch[ichan] = visimg[ichan * freq_per_chan];
+    weights_ch[ichan] = weights[ichan * freq_per_chan];
     #endif
   }
 
@@ -176,6 +177,7 @@ void channelselect(
   free(weights);
   #endif
 }
+*/
 
 #ifdef RICK_GPU
 
@@ -350,8 +352,8 @@ void initialize_array(
   free(counter);
 
 #ifdef VERBOSE
-  for (int iii = 0; iii < nsectors + 1; iii++)
-    printf("HISTO %d %d %ld\n", rank, iii, histo_send[iii]);
+  //for (int iii = 0; iii < nsectors + 1; iii++)
+    //printf("HISTO %d %d %ld\n", rank, iii, histo_send[iii]);
 #endif
 }
 
@@ -560,7 +562,7 @@ void wstack(
   mmm = cudaFree(convkernel_g);
 #endif
 
-#else // switch between CPU and GPU gridding
+#else // switch between GPU and CPU gridding
 
 #ifdef _OPENMP
   omp_set_num_threads(num_threads);
@@ -576,19 +578,21 @@ void wstack(
 #endif
 
 #if defined(WEIGHTING_BRIGGS)
-  float robust = 2.0;
+  float robust = -1.0;
 #endif
 
 #if defined(WEIGHTING_UNIFORM) || defined(WEIGHTING_BRIGGS)
-  float *robustness;
-  float *out_weight_uniform;
-  float *weight_uv;
-  float *weight_uv_2;
+  float *robustness;    // Used only for the Briggs weighting
+  float *out_weight_uniform;    // To check whether it is required
+  float *weight_uv;   // Weight per cell
+  float *weight_uv_2;   // Weight**2 per cell (used only for the Briggs weighting)
+
+  printf("Not uniform weighting \n");
 
   out_weight_uniform = (float *)malloc(num_points * sizeof(float));
   weight_uv = (float *)malloc(grid_size_x * grid_size_y * num_w_planes * sizeof(float));
   weight_uv_2 = (float *)malloc(grid_size_x * grid_size_y * num_w_planes * sizeof(float));
-  robustness = (float *)malloc(grid_size_x * grid_size_y * num_w_planes * size * sizeof(float));
+  robustness = (float *)malloc(grid_size_x * grid_size_y * num_w_planes * sizeof(float));
 
   for (i = 0; i < num_points; i++)
   {
@@ -618,9 +622,12 @@ void wstack(
     {
       for (j = jmin; j <= jmax; j++)
       {
-        unsigned int iKer = 2 * (j + k * grid_size_x + grid_w * grid_size_x * grid_size_y);
+        unsigned int iKer = 1 * (j + k * grid_size_x + grid_w * grid_size_x * grid_size_y);
+        //printf("Pre weighting_uniform function \n");    // Passed
+
 #if defined(WEIGHTING_UNIFORM)
         weighting_uniform(iKer, visindex, weight, weight_uv);
+        //printf("Uniform weighting grid created, summing weights for each cell\n");  // Passed
         // To be done!!!!!!!!!!
         // float weights_stokes_sum = 0.0;
         // for (unsigned int i = 0; i < (Nmeasures * freq_per_chan); i++)
@@ -633,7 +640,7 @@ void wstack(
       }
     }
   }
-  // printf("Sum of all Stokes weights %f\n", weights_stokesI_sum);
+  printf("End of the weights loop \n");
 
 #endif
 
@@ -674,23 +681,24 @@ void wstack(
       {
         double u_dist = (double)j + 0.5 - pos_u;
         int iKer = 2 * (j + k * grid_size_x + grid_w * grid_size_x * grid_size_y);
+        int iKer_weight = 1 * (j + k * grid_size_x + grid_w * grid_size_x * grid_size_y);
         int jKer = (int)(increaseprecision * (fabs(u_dist + (double)KernelLen)));
         int kKer = (int)(increaseprecision * (fabs(v_dist + (double)KernelLen)));
 
 #if defined(WEIGHTING_UNIFORM)
-        if (weight_uv[iKer] != 0.0)
+        if (weight_uv[iKer_weight] != 0.0)
         {
-          out_weight_uniform[visindex] = 1.0 / weight_uv[iKer];
+          out_weight_uniform[visindex] = 1.0 / weight_uv[iKer_weight];
         }
         else
         {
           out_weight_uniform[visindex] = 0.0;
         }
 #elif defined(WEIGHTING_BRIGGS)
-        if (weight_uv[iKer] != 0.0)
+        if (weight_uv[iKer_weight] != 0.0)
         {
-          robustness[iKer] = (pow((5.0 * (1.0 / (pow(10.0, robust)))), 2)) / (weight_uv_2[iKer] / weight_uv[iKer]);
-          out_weight_uniform[visindex] = weight[visindex] / (1 + robustness[iKer] * weight_uv[iKer]);
+          robustness[iKer_weight] = (pow((5.0 * (1.0 / (pow(10.0, robust)))), 2)) / (weight_uv_2[iKer_weight] / weight_uv[iKer_weight]);
+          out_weight_uniform[visindex] = weight[visindex] / (1 + robustness[iKer_weight] * weight_uv[iKer_weight]);
         }
         else
         {
@@ -740,6 +748,9 @@ void wstack(
       }
     }
   }
+
+//printf("Out of the add_term loop \n");    // Passed
+
 #if defined(ACCOMP) && (GPU_STACKING)
 #pragma omp target exit data map(delete : uu[0 : num_points], vv[0 : num_points], ww[0 : num_points], vis_real[0 : Nvis], vis_img[0 : Nvis], weight[0 : Nvis / freq_per_chan], grid[0 : 2 * num_w_planes * grid_size_x * grid_size_y])
 #endif
@@ -1060,7 +1071,7 @@ void gridding(
     char *gridded_writedata1,
     char *gridded_writedata2,
 #endif
-#if defined(STOKESI) || defined(STOKESQ) || defined(STOKESU)
+#if defined(STOKESI) || defined(STOKESQ) || defined(STOKESU) || defined(STOKESV)
     float *visreal_stokes,
     float *visimg_stokes,
     float *weights_stokes,
@@ -1070,8 +1081,7 @@ void gridding(
     float *weights,
 #endif
     double uvmin,
-    double uvmax,
-    int freq_index)
+    double uvmax)
 {
 
   if (rank == 0)
@@ -1100,19 +1110,21 @@ void gridding(
       yaxis,
       dx);
 
+      /*
   channelselect(
       nmeasures,
       freq_per_chan,
 #if defined(STOKESI) || defined(STOKESQ) || defined(STOKESU)
       visreal_stokes,
       visimg_stokes,
-      weights_stokes,
+      weights_stokes
 #else
       visreal,
       visimg,
-      weights,
+      weights
 #endif
-      freq_index);
+);
+*/
 
   // Sector and Gridding data
   gridding_data(
@@ -1137,14 +1149,14 @@ void gridding(
       ww,
       grid,
       gridss,
-#if defined(STOKESI) || defined(STOKESQ) || defined(STOKESU)
-      visreal_stokes_ch,
-      visimg_stokes_ch,
-      weights_stokes_ch,
+#if defined(STOKESI) || defined(STOKESQ) || defined(STOKESU) || defined(STOKESV)
+      visreal_stokes,
+      visimg_stokes,
+      weights_stokes,
 #else
-      visreal_ch,
-      visimg_ch,
-      weights_ch,
+      visreal,
+      visimg,
+      weights,
 #endif
 #if defined(WRITE_DATA)
       gridded_writedata1,
